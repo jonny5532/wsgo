@@ -1,0 +1,6 @@
+wsgo
+*.sqlite3
+__pycache__
+*.pyc
+app
+oldapp
