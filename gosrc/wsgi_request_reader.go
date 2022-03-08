@@ -2,15 +2,12 @@ package main
 
 /*
 #include <Python.h>
-
-extern void gil_get();
-extern void gil_release();
-
 */
 import "C"
 
 import (
 	"io"
+	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -24,10 +21,12 @@ func init() {
 
 //export go_wsgi_read_request
 func go_wsgi_read_request(request_id C.long, to_read C.long) *C.PyObject {
-	C.gil_release()
-	// gilState := C.PyThreadState_Get()
-	// C.PyEval_SaveThread()
-	// defer C.PyEval_RestoreThread(gilState)
+	// We should already be in a locked thread but we'll do this again to be safe
+	runtime.LockOSThread()
+
+	// Release the GIL
+	gilState := C.PyThreadState_Get()
+	C.PyEval_SaveThread()
 
 	buf_len := 1047586 * 32 //32mb maximum read in one go
 	if to_read > 0 {
@@ -49,8 +48,13 @@ func go_wsgi_read_request(request_id C.long, to_read C.long) *C.PyObject {
 	// hacky version without the extra copy (by exploiting the layout of slices):
 	c_str := *(**C.char)(unsafe.Pointer(&buf))
 
-	C.gil_get()
-	return C.PyBytes_FromStringAndSize(c_str, C.long(n))
+	ret := C.PyBytes_FromStringAndSize(c_str, C.long(n))
+
+	//Regrab the GIL
+	C.PyEval_RestoreThread(gilState)
+	runtime.UnlockOSThread()
+
+	return ret
 }
 
 func AddWsgiRequestReader(requestId int64, reader io.Reader) {

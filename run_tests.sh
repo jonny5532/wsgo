@@ -1,0 +1,5 @@
+./build_version.sh 3 6 15 python-3.6 "LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/python3.? /tests/basic.py -b"
+./build_version.sh 3 7 12 python-3.7 "LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/python3.? /tests/basic.py -b"
+./build_version.sh 3 8 12 python-3.8-embed "LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/python3.? /tests/basic.py -b"
+./build_version.sh 3 9 10 python-3.9-embed "LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/python3.? /tests/basic.py -b"
+./build_version.sh 3 10 2 python-3.10-embed "LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/python3.10 /tests/basic.py -b"

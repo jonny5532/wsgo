@@ -16,7 +16,7 @@ RUN cd /tmp/Python-${PY_MAJ}* \
  && make -j6 \
  && make altinstall
 
-RUN LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/pip${PY_MAJ}.${PY_MIN} install --upgrade wheel setuptools
+RUN LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/pip${PY_MAJ}.${PY_MIN} install --upgrade wheel setuptools requests
 
 RUN cp /usr/local/lib/pkgconfig/${PY_PKGCONFIG}.pc /usr/local/lib/pkgconfig/python-3-embed.pc
 

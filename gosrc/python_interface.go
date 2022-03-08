@@ -88,24 +88,6 @@ PyObject *py_wsgi_start_response(PyObject *self, PyObject **args, Py_ssize_t nar
     return Py_None;
 }
 
-pthread_key_t gil_key;
-void gil_init() {
-    if(pthread_key_create(&gil_key, NULL)) {
-        printf("pthread_key_create() error");
-        exit(1);
-    }
-    pthread_setspecific(gil_key, (void *) PyThreadState_Get());
-}
-
-void gil_get() {
-    PyEval_RestoreThread((PyThreadState *) pthread_getspecific(gil_key));
-}
-
-void gil_release() {
-    pthread_setspecific(gil_key, (void *) PyThreadState_Get());
-    PyEval_SaveThread();
-}
-
 typedef struct wsgo_WsgiInput {
     PyObject_HEAD
     long request_id;
@@ -349,8 +331,6 @@ func InitPythonInterpreter(module_name string) {
 	C.register_wsgo_module() // must happen before Py_Initialize
 
 	C.initialise_python()
-
-	C.gil_init()
 
 	s := C.CString("path")
 	sys_path := C.PySys_GetObject(s)
