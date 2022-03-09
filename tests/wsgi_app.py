@@ -1,4 +1,5 @@
 import hashlib
+import time
 
 def application(environ, start_response):
     h = hashlib.md5()
@@ -13,6 +14,11 @@ def application(environ, start_response):
                 break
         assert n>0
 
+    if environ['PATH_INFO']=='/wait/':
+        time.sleep(1)
+
+    print("calling start_response")
+  
     start_response('200 OK', [
         ('Content-Type','text/html'),
         ('Set-Cookie','cookie1=cookievalue1'),

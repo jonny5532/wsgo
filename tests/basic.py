@@ -49,6 +49,14 @@ class BasicTests(unittest.TestCase):
         r = requests.get('http://localhost:8000')
         self.assertEqual(r.status_code, 200)
 
+    def test_wait(self):
+        self.start('--module', 'wsgi_app', '--process', '1')
+        try:
+            r = requests.get('http://localhost:8000/wait/', timeout=0.001)
+        except requests.exceptions.ReadTimeout as e: pass
+        time.sleep(2)
+        self.assertNotIn("calling start_response", sys.stdout.getvalue())
+
     def test_post(self):
         self.start('--module', 'wsgi_app', '--process', '1')
         r = requests.post('http://localhost:8000', data={
@@ -75,4 +83,4 @@ class BasicTests(unittest.TestCase):
         self.assertEqual(r.cookies['cookie3'], 'cookievalue3')
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest.main(buffer=True)

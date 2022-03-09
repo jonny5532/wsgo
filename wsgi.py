@@ -53,8 +53,8 @@ def application(env, start_response):
     #print(sys._debugmallocstats())
 
     start_response('200 OK', [
-        ('Content-Type','text/html'),
+        #('Content-Type','text/html'),
         ('SomeHeader', 'yeah'),
-        ('SomeHeader', 'yeah2'),
+        ('X-sendfile', 'go.mod'),
     ])
     return [("The time is %s!"%(datetime.datetime.now())).encode('utf-8')]

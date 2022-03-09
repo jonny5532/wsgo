@@ -30,8 +30,8 @@ RUN go mod download
 
 ADD gosrc/*.go /code/
 
-RUN --mount=type=cache,target=/root/.cache/go-build-py${PY_MAJ}${PY_MIN} \
- CGO_LDFLAGS=-no-pie go build
+#RUN --mount=type=cache,target=/root/.cache/go-build-py${PY_MAJ}${PY_MIN} \
+RUN CGO_LDFLAGS=-no-pie go build
 
 
 

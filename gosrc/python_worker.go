@@ -108,6 +108,9 @@ func (worker *PythonWorker) Run() {
 			go func() {
 				select {
 				case <-pydone:
+					return
+                                case <-job.req.Context().Done():
+					// Other end hung up
 				case <-time.After(time.Duration(requestTimeout) * time.Second):
 					fmt.Println("Timed out!")
 
@@ -115,20 +118,20 @@ func (worker *PythonWorker) Run() {
 					// attempt at interrupting it hasn't worked
 					worker.stuck = true
 
-					runtime.LockOSThread()
-					gs := C.PyGILState_Ensure()
-
 					// trigger a fancy traceback
 					syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
 					// wait for the traceback
 					time.Sleep(100 * time.Millisecond)
-
-					if C.PyThreadState_SetAsyncExc(thread_id, C.PyExc_InterruptedError) == 0 {
-						log.Println("Failed to issue InterruptedError to stuck worker!")
-					}
-
-					C.PyGILState_Release(gs)
 				}
+
+				runtime.LockOSThread()
+				gs := C.PyGILState_Ensure()
+
+				if C.PyThreadState_SetAsyncExc(thread_id, C.PyExc_InterruptedError) == 0 {
+					log.Println("Failed to issue InterruptedError to stuck worker!")
+				}
+
+				C.PyGILState_Release(gs)
 			}()
 		}
 
