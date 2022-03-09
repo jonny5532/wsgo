@@ -15,6 +15,9 @@ def application(environ, start_response):
 
     start_response('200 OK', [
         ('Content-Type','text/html'),
+        ('Set-Cookie','cookie1=cookievalue1'),
+        ('Set-Cookie','cookie2=cookievalue2'),
+        ('Set-Cookie','cookie3=cookievalue3'),
     ])
 
     return [h.hexdigest().encode('utf-8')]
