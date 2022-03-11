@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+    "runtime"
 	"unsafe"
 )
 
@@ -391,4 +392,26 @@ wsgo.timer = _timer_decorator
 	C.PyType_Ready(&C.wsgi_input_type)
 
 	C.PyEval_SaveThread()
+}
+
+func PyEval(code string) (*C.PyObject, func()) {
+    runtime.LockOSThread()
+    gilState := C.PyGILState_Ensure()
+
+    cmd := C.CString(code)
+    defer C.free(unsafe.Pointer(cmd))
+
+    m := C.CString("__main__")
+    defer C.free(unsafe.Pointer(m))
+    globals := C.PyModule_GetDict(C.PyImport_AddModule(m))
+    obj := C.PyRun_String(cmd, C.Py_eval_input, globals, globals)
+    log.Println(obj)
+
+    done := func() {
+        C.Py_DecRef(obj)
+        C.PyGILState_Release(gilState)
+        runtime.UnlockOSThread()
+    }
+
+    return obj, done
 }
