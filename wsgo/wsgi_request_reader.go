@@ -1,4 +1,4 @@
-package main
+package wsgo
 
 /*
 #include <Python.h>

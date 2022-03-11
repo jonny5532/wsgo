@@ -28,10 +28,13 @@ ADD go.mod go.sum /code/
 
 RUN go mod download
 
-ADD gosrc/*.go /code/
+ADD *.go /code/
+ADD wsgo/ /code/wsgo/
+
+RUN mkdir bin
 
 #RUN --mount=type=cache,target=/root/.cache/go-build-py${PY_MAJ}${PY_MIN} \
-RUN CGO_LDFLAGS=-no-pie go build
+RUN CGO_LDFLAGS=-no-pie go build -o bin/wsgo
 
 
 

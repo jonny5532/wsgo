@@ -1,9 +1,4 @@
-package main
-
-/*
-#include <Python.h>
-*/
-import "C"
+package wsgo
 
 import (
 	"context"
@@ -16,6 +11,12 @@ import (
 
 	"github.com/projecthunt/reuseable"
 )
+
+/*
+#include <Python.h>
+*/
+import "C"
+
 
 type Job struct {
 	w          http.ResponseWriter
@@ -159,7 +160,7 @@ func Shutdown(message string) {
 	log.Fatalln("Server shut down.")
 }
 
-func main() {
+func StartupWsgo(initMux func(*http.ServeMux)) {
 	ParseFlags()
 
 	if process == 0 {
@@ -180,6 +181,7 @@ func main() {
 
 	serverMux := http.NewServeMux()
 	serverMux.HandleFunc("/", Serve)
+	initMux(serverMux)
 
 	// Go http's timeouts are rather crude.
 	server = &http.Server{
@@ -195,5 +197,5 @@ func main() {
 		ReadHeaderTimeout: 2 * time.Second,
 		Handler:           serverMux,
 	}
-	server.Serve(listener)
+	server.Serve(listener)	
 }

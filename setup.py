@@ -39,7 +39,7 @@ setup(
     description="Simple and fast WSGI server in Go",
     long_description="",
     distclass=CustomDistribution,
-    data_files=[ ('bin', ['wsgo']) ],
+    data_files=[ ('bin', ['bin/wsgo']) ],
     zip_safe=False,
     #platforms='any',
     classifiers=[
