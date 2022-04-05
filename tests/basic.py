@@ -1,6 +1,6 @@
 import os
+import random
 import requests
-import signal
 import subprocess
 import sys
 import threading
@@ -18,7 +18,7 @@ class BasicTests(unittest.TestCase):
 
     def start(self, *args):
         self.process = subprocess.Popen(
-            ['/code/wsgo'] + list(args),
+            ['/code/bin/wsgo'] + list(args),
             cwd=os.path.dirname(__file__),
             #start_new_session=True,
             stdout=subprocess.PIPE,

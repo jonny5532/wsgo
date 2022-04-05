@@ -105,7 +105,9 @@ func PyDictSet(dict *C.PyObject, key string, value string) {
 	value_obj := C.PyUnicode_FromString(value_str)
 	defer C.Py_DecRef(value_obj)
 
-	C.PyDict_SetItem(dict, key_obj, value_obj)
+	if key_obj != nil && value_obj != nil {
+		C.PyDict_SetItem(dict, key_obj, value_obj)
+	}
 }
 
 func PyDictSetObject(dict *C.PyObject, key string, obj *C.PyObject) {
@@ -114,5 +116,7 @@ func PyDictSetObject(dict *C.PyObject, key string, obj *C.PyObject) {
 	key_obj := C.PyUnicode_FromString(key_str)
 	defer C.Py_DecRef(key_obj)
 
-	C.PyDict_SetItem(dict, key_obj, obj)
+	if key_obj != nil && obj != nil {
+		C.PyDict_SetItem(dict, key_obj, obj)
+	}
 }

@@ -8,9 +8,7 @@ import (
 
 func main() {
 	wsgo.StartupWsgo(func(mux *http.ServeMux) {
-		_, done := wsgo.PyEval(`__import__("wsgo").cron`)
-
-		done()
-
+//		_, done := wsgo.PyEval(`__import__("wsgo").cron`)
+//		done()
 	})
 }

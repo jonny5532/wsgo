@@ -58,3 +58,5 @@ def application(env, start_response):
         ('X-sendfile', 'go.mod'),
     ])
     return [("The time is %s!"%(datetime.datetime.now())).encode('utf-8')]
+
+data = {'hi':'there'}
