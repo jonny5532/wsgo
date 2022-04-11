@@ -82,5 +82,16 @@ class BasicTests(unittest.TestCase):
         self.assertEqual(r.cookies['cookie2'], 'cookievalue2')
         self.assertEqual(r.cookies['cookie3'], 'cookievalue3')
 
+    def test_threading(self):
+        self.start('--module', 'wsgi_app', '--process', '1')
+        def go():
+            r = requests.get('http://localhost:8000/output/', timeout=5)
+            assert len(r.content)==500000000
+        for i in range(16):
+            threading.Thread(target=go).start()
+        time.sleep(2)
+        #print(sys.stdout.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main(buffer=True)

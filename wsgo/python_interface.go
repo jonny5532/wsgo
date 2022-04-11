@@ -310,11 +310,19 @@ func ReadWsgiResponseToWriter(response *C.PyObject, w io.Writer) error {
 		}
 
 		// safe version: (does a memcpy internally)
-		//v := C.GoBytes(unsafe.Pointer(buf), (C.int)(size))
+		v := C.GoBytes(unsafe.Pointer(buf), (C.int)(size))
 		// unsafe version: (doesn't, we trust that the writer won't keep a reference)
-		v := unsafe.Slice((*byte)(unsafe.Pointer(buf)), size)
+		//v := unsafe.Slice((*byte)(unsafe.Pointer(buf)), size)
+
+		// Release the GIL whilst we write (does the fact we're borrowing a reference above matter???)
+		gilState := C.PyThreadState_Get()
+		C.PyEval_SaveThread()
 
 		n, err := w.Write(v)
+
+		// Regrab the GIL
+		C.PyEval_RestoreThread(gilState)
+
 		if err != nil {
 			log.Println("Failed to write response:", err)
 			break

@@ -48,10 +48,11 @@ func go_wsgi_read_request(request_id C.long, to_read C.long) *C.PyObject {
 	// hacky version without the extra copy (by exploiting the layout of slices):
 	c_str := *(**C.char)(unsafe.Pointer(&buf))
 
-	ret := C.PyBytes_FromStringAndSize(c_str, C.long(n))
-
 	//Regrab the GIL
 	C.PyEval_RestoreThread(gilState)
+
+	ret := C.PyBytes_FromStringAndSize(c_str, C.long(n))
+
 	runtime.UnlockOSThread()
 
 	return ret

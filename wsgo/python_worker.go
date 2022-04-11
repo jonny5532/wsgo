@@ -104,13 +104,28 @@ func (worker *PythonWorker) Run() {
 		thread_id := C.PyThread_get_thread_ident()
 
 		if requestTimeout > 0 {
+			exc := C.PyExc_InterruptedError
+
 			//add a request timeout to kill the worker
 			go func() {
 				select {
 				case <-pydone:
 					return
-                                case <-job.req.Context().Done():
-					// Other end hung up
+				// case <-job.req.Context().Done():
+				// 	// Other end hung up
+				// 	fmt.Println("Other end disconnected!")
+
+				// 	// Give the script a chance to exit cleanly
+				// 	time.Sleep(200 * time.Millisecond)
+
+				// 	select {
+				// 		case <-pydone:
+				// 			return
+				// 		default:
+				// 	}
+
+				// 	exc = C.PyExc_BrokenPipeError
+
 				case <-time.After(time.Duration(requestTimeout) * time.Second):
 					fmt.Println("Timed out!")
 
@@ -127,7 +142,7 @@ func (worker *PythonWorker) Run() {
 				runtime.LockOSThread()
 				gs := C.PyGILState_Ensure()
 
-				if C.PyThreadState_SetAsyncExc(thread_id, C.PyExc_InterruptedError) == 0 {
+				if C.PyThreadState_SetAsyncExc(thread_id, exc) == 0 {
 					log.Println("Failed to issue InterruptedError to stuck worker!")
 				}
 
