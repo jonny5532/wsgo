@@ -1,5 +1,8 @@
 import hashlib
 import time
+import threading
+
+thread_local = threading.local()
 
 def application(environ, start_response):
     h = hashlib.md5()
@@ -25,5 +28,15 @@ def application(environ, start_response):
         ('Set-Cookie','cookie2=cookievalue2'),
         ('Set-Cookie','cookie3=cookievalue3'),
     ])
+
+    if environ['PATH_INFO']=='/output/':
+        def ret():
+            thread_local.name = threading.current_thread().name
+            for i in range(100):
+                yield b'hello'*1000000
+                #print('checking name', thread_local.name, threading.current_thread().name)
+                assert thread_local.name == threading.current_thread().name
+        return ret()
+
 
     return [h.hexdigest().encode('utf-8')]
