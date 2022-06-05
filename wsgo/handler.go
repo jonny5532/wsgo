@@ -135,7 +135,15 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if isHeavy {
-		heavyJobs <- job
+		// could drop heavy queries if the handlers are too backlogged?
+		select {
+		case heavyJobs <- job:
+		// 	//
+		// case <-time.After(time.Duration(5) * time.Second):
+		// 	// heavy job timeout?
+		// 	http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+		// 	return
+		}		
 	} else {
 		normalJobs <- job
 	}
