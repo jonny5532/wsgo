@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 /*
@@ -62,10 +64,19 @@ func (worker *PythonWorker) Run() {
 	// the python GIL will get very upset.
 	runtime.LockOSThread()
 
+	// Pin all the threads to the same CPU, which should reduce the 'convoy problem' caused by the GIL
+	var cpuSet unix.CPUSet
+	unix.SchedGetaffinity(0, &cpuSet)
+	cpuCount := cpuSet.Count()
+	cpuSet.Zero()
+	cpuSet.Set(process % cpuCount)
+	unix.SchedSetaffinity(0, &cpuSet)
+
 	//log.Println("Worker", strconv.Itoa(process)+":"+strconv.Itoa(worker.number), "started!")
 
 	for {
 		var job *Job
+		var backgroundJob *BackgroundJob
 
 		worker.started = time.Time{}
 
@@ -86,12 +97,13 @@ func (worker *PythonWorker) Run() {
 			case j := <-heavyJobs:
 				job = j
 			case bj := <-backgroundJobs:
-				// Do background jobs separately
-				worker.started = time.Now()
-				gilState := C.PyGILState_Ensure()
-				worker.HandleBackgroundJob(bj)
-				C.PyGILState_Release(gilState)
-				continue
+				backgroundJob = bj
+				// // Do background jobs separately
+				// worker.started = time.Now()
+				// gilState := C.PyGILState_Ensure()
+				// worker.HandleBackgroundJob(bj)
+				// C.PyGILState_Release(gilState)
+				// continue
 			}
 		}
 
@@ -151,7 +163,11 @@ func (worker *PythonWorker) Run() {
 		}
 
 		start := time.Now()
-		worker.HandleJob(job)
+		if job != nil {
+			worker.HandleJob(job)
+		} else {
+			worker.HandleBackgroundJob(backgroundJob)
+		}
 
 		worker.stuck = false
 		pydone <- true
@@ -160,6 +176,11 @@ func (worker *PythonWorker) Run() {
 
 		finish := time.Now()
 		elapsed := finish.Sub(start).Milliseconds()
+
+		if job == nil {
+			// was a background task, skip the rest
+			continue
+		}
 
 		job.done <- true
 
