@@ -175,7 +175,7 @@ func (cron *Cron) calculateNextRun() time.Time {
 			next = cron.min
 		}
 		nextRun = time.Date(nextRun.Year(), nextRun.Month(), nextRun.Day(), nextRun.Hour(), next, 0, 0, nextRun.Location())
-		if next <= cur {
+		if next < cur {
 			nextRun = nextRun.Add(1 * time.Hour)
 		}
 	}
