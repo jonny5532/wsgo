@@ -6,7 +6,7 @@ from setuptools.dist import Distribution
 
 from wheel.bdist_wheel import bdist_wheel
 
-wsgo_version = "0.0.5"
+wsgo_version = "0.0.6"
 
 
 class CustomWheel(bdist_wheel):
