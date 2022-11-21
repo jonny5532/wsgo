@@ -5,8 +5,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+    "syscall"
 	"time"
 
 	"github.com/projecthunt/reuseable"
@@ -93,7 +96,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	alreadyResponded := try_cache_status == HIT_BUT_EXPIRING_SOON
 
 	if AllWorkersAreStuck() {
-		Shutdown("All worker threads are stuck, quitting!")
+		log.Fatalln("All worker threads are stuck, quitting!")
 	}
 
 	isHeavy := IsRequestHeavy(req)
@@ -159,15 +162,6 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func Shutdown(message string) {
-	if server == nil {
-		return
-	}
-	log.Println(message)
-	server.Shutdown(context.Background())
-	log.Fatalln("Server shut down.")
-}
-
 func StartupWsgo(initMux func(*http.ServeMux)) {
 	ParseFlags()
 
@@ -205,5 +199,23 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 		ReadHeaderTimeout: 2 * time.Second,
 		Handler:           serverMux,
 	}
-	server.Serve(listener)	
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	shuttingDown := make(chan bool, 0)
+	go func() {
+        sig := <-sigs
+        log.Println("Process", process, "got", sig, "signal, shutting down...")
+		server.Shutdown(context.Background())
+		shuttingDown <- true
+    }()
+
+	server.Serve(listener)
+
+	select {
+		case <-shuttingDown:
+			log.Println("Process", process, "shut down gracefully.")
+		case <-time.After(time.Duration(requestTimeout) * time.Second):
+			log.Println("Process", process, "shutdown timed out, exiting.")
+	}
 }

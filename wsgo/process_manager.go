@@ -4,12 +4,17 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"sync"
+    "syscall"
 	"time"
 )
 
 var EXITCODE_INVALID int = 27
+
+var processCommands []*exec.Cmd
+var processCommandsMutex sync.Mutex
 
 func RunProcess(wg *sync.WaitGroup, process int) {
 	for {
@@ -26,7 +31,13 @@ func RunProcess(wg *sync.WaitGroup, process int) {
 			// Inherit parent process environment
 			os.Environ()...,
 		)
+
+		processCommandsMutex.Lock()
+		processCommands = append(processCommands, cmd)
+		processCommandsMutex.Unlock()
+
 		cmd.Run()
+
 		if cmd.ProcessState.Success() {
 			log.Println("Process", process, "has finished.")
 			break
@@ -47,6 +58,18 @@ func RunProcessManager() {
 		wg.Add(1)
 		go RunProcess(&wg, i)
 	}
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+        <- sigs
+		processCommandsMutex.Lock()
+		defer processCommandsMutex.Unlock()
+
+		for _, cmd := range processCommands {
+			cmd.Process.Signal(syscall.SIGTERM)
+		}
+    }()
 
 	wg.Wait()
 }
