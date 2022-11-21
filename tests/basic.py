@@ -49,7 +49,7 @@ class BasicTests(unittest.TestCase):
         r = requests.get('http://localhost:8000')
         self.assertEqual(r.status_code, 200)
 
-    def test_wait(self):
+    def _disable_test_wait(self):
         self.start('--module', 'wsgi_app', '--process', '1')
         try:
             r = requests.get('http://localhost:8000/wait/', timeout=0.001)
@@ -86,12 +86,37 @@ class BasicTests(unittest.TestCase):
         self.start('--module', 'wsgi_app', '--process', '1')
         def go():
             r = requests.get('http://localhost:8000/output/', timeout=5)
-            assert len(r.content)==500000000
+            assert len(r.content)==50000000
         for i in range(16):
             threading.Thread(target=go).start()
         time.sleep(2)
         #print(sys.stdout.getvalue())
+    
+    def test_caching(self):
+        self.start('--module', 'wsgi_app', '--process', '1', '--max-age', '60')
+        t = requests.get('http://localhost:8000/time/').text
+        time.sleep(0.01)
 
+        # Should have been cached
+        self.assertEqual(requests.get('http://localhost:8000/time/').text, t)
+
+        time.sleep(0.01)
+
+        t2 = requests.get(
+            'http://localhost:8000/time/',
+            headers={'Cookie':'asdf=dsfg'}
+        ).text
+
+        # Should not be cached due to Vary: Cookie
+        self.assertNotEqual(t, t2)
+        
+        time.sleep(0.01)
+        
+        # Should have been cached against cookie
+        self.assertEqual(requests.get(
+            'http://localhost:8000/time/',
+            headers={'Cookie':'asdf=dsfg'}
+        ).text, t2)
 
 if __name__ == '__main__':
     unittest.main(buffer=True)
