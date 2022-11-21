@@ -63,8 +63,12 @@ const (
 	HIT_BUT_EXPIRING_SOON                  = 2
 )
 
+func DeriveCacheKey(req *http.Request) string {
+	return req.Host + req.URL.Path + "?" + req.URL.RawQuery
+}
+
 func TryCache(w http.ResponseWriter, req *http.Request) TryCacheResponse {
-	cacheKey := req.URL.String()
+	cacheKey := DeriveCacheKey(req)
 	now := time.Now()
 
 	pageCacheMutex.Lock()
@@ -203,7 +207,7 @@ func CachePage(cw *CacheWriter, req *http.Request) {
 
 	// TODO: facility for stripping uninteresting params from query (eg utm_ trackers and stuff)
 
-	cacheKey := req.URL.String()
+	cacheKey := DeriveCacheKey(req)
 	entry := &PageCacheEntry{
 		buf:         cw.buf,
 		statusCode:  cw.statusCode,
