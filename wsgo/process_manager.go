@@ -13,6 +13,7 @@ import (
 
 var EXITCODE_INVALID int = 27
 
+var processManagerStopping bool = false
 var processCommands []*exec.Cmd
 var processCommandsMutex sync.Mutex
 
@@ -34,8 +35,14 @@ func RunProcess(wg *sync.WaitGroup, process int) {
 
 		processCommandsMutex.Lock()
 		processCommands = append(processCommands, cmd)
+		shouldExit := processManagerStopping
 		processCommandsMutex.Unlock()
 
+		if shouldExit {
+			log.Println("Process", process, "not started.")
+			break
+		}
+		
 		cmd.Run()
 
 		if cmd.ProcessState.Success() {
@@ -64,6 +71,7 @@ func RunProcessManager() {
 	go func() {
         <- sigs
 		processCommandsMutex.Lock()
+		processManagerStopping = true
 		defer processCommandsMutex.Unlock()
 
 		for _, cmd := range processCommands {
