@@ -13,6 +13,7 @@ import (
 #cgo pkg-config: python-3-embed
 
 #include <Python.h>
+#include <time.h>
 
 // Is a macro in Python <3.8 so needs concreting
 int _PyIter_Check(PyObject *o) {
@@ -253,6 +254,12 @@ void initialise_python() {
 
 }
 
+uint64_t get_thread_cpu_time() {
+	struct timespec t;
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+	return (t.tv_sec*1000) + (t.tv_nsec/1000000);
+}
+
 
 */
 import "C"
@@ -422,4 +429,8 @@ func PyEval(code string) (*C.PyObject, func()) {
 	}
 
 	return obj, done
+}
+
+func GetThreadCpuTime() uint64 {
+	return uint64(C.get_thread_cpu_time());
 }

@@ -108,6 +108,7 @@ func (worker *PythonWorker) Run() {
 		}
 
 		worker.started = time.Now()
+		cpu_start := GetThreadCpuTime()
 
 		// Grab the GIL
 		gilState := C.PyGILState_Ensure()
@@ -176,6 +177,7 @@ func (worker *PythonWorker) Run() {
 
 		finish := time.Now()
 		elapsed := finish.Sub(start).Milliseconds()
+		cpu_elapsed := GetThreadCpuTime() - cpu_start
 
 		if job == nil {
 			// was a background task, skip the rest
@@ -190,6 +192,7 @@ func (worker *PythonWorker) Run() {
 		 	job.statusCode,
 		 	finish,
 		 	int(elapsed),
+			int(cpu_elapsed),
 		 	worker.number,
 		)
 

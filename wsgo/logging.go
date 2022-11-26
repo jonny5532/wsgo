@@ -17,7 +17,7 @@ func firstNonEmpty(a string, b string, c string) string {
 	return c
 }
 
-func LogRequest(req *http.Request, statusCode int, finishTime time.Time, elapsed int, workerNumber int) {
+func LogRequest(req *http.Request, statusCode int, finishTime time.Time, elapsed int, cpuTime int, workerNumber int) {
 	remoteAddr := req.RemoteAddr
 	remoteAddrColonIndex := strings.LastIndex(remoteAddr, ":")
 	if remoteAddrColonIndex > -1 {
@@ -38,5 +38,6 @@ func LogRequest(req *http.Request, statusCode int, finishTime time.Time, elapsed
 		"\""+firstNonEmpty(req.Header.Get("Referer"), "-", "-")+"\"",
 		"\""+firstNonEmpty(req.Header.Get("User-Agent"), "-", "-")+"\"",
 		strconv.Itoa(elapsed)+"ms",
+		strconv.Itoa(cpuTime)+"ms",
 	)
 }
