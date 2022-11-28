@@ -57,6 +57,83 @@ func StartWorkers() {
 		}
 		go workers[i].Run()
 	}
+
+	// this should probably wait until cron actually registers something?
+	backgroundWorker := &PythonWorker{}
+	go backgroundWorker.BackgroundWorkerRun()
+}
+
+func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, int64, int64) {
+	worker.started = time.Now()
+	cpu_start := GetThreadCpuTime()
+
+	// Grab the GIL
+	gilState := C.PyGILState_Ensure()
+
+	pydone := make(chan bool, 1)
+	thread_id := C.PyThread_get_thread_ident()
+
+	if timeout > 0 {
+		exc := C.PyExc_InterruptedError
+
+		//add a request timeout to kill the worker
+		go func() {
+			select {
+			case <-pydone:
+				return
+			// case <-job.req.Context().Done():
+			// 	// Other end hung up
+			// 	fmt.Println("Other end disconnected!")
+
+			// 	// Give the script a chance to exit cleanly
+			// 	time.Sleep(200 * time.Millisecond)
+
+			// 	select {
+			// 		case <-pydone:
+			// 			return
+			// 		default:
+			// 	}
+
+			// 	exc = C.PyExc_BrokenPipeError
+
+			case <-time.After(time.Duration(timeout) * time.Second):
+				fmt.Println("Timed out!")
+
+				// flag worker as stuck, so we can detect whether our
+				// attempt at interrupting it hasn't worked
+				worker.stuck = true
+
+				// trigger a fancy traceback
+				syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
+				// wait for the traceback
+				time.Sleep(100 * time.Millisecond)
+			}
+
+			runtime.LockOSThread()
+			gs := C.PyGILState_Ensure()
+
+			if C.PyThreadState_SetAsyncExc(thread_id, exc) == 0 {
+				log.Println("Failed to issue InterruptedError to stuck worker!")
+			}
+
+			C.PyGILState_Release(gs)
+		}()
+	}
+
+	start := time.Now()
+
+	task()
+
+	worker.stuck = false
+	pydone <- true
+
+	C.PyGILState_Release(gilState)
+
+	finish := time.Now()
+	elapsed := finish.Sub(start).Milliseconds()
+	cpu_elapsed := int64(GetThreadCpuTime() - cpu_start)
+
+	return finish, elapsed, cpu_elapsed
 }
 
 func (worker *PythonWorker) Run() {
@@ -76,115 +153,17 @@ func (worker *PythonWorker) Run() {
 
 	for {
 		var job *Job
-		var backgroundJob *BackgroundJob
 
-		worker.started = time.Time{}
+		worker.started = time.Time{} //?
 
-		// Grab the next job (from one or several channels depending on the worker settings)
-		if worker.normalOnly {
-			job = <-normalJobs
-		} else if worker.nonBackground {
-			select {
-			case j := <-normalJobs:
-				job = j
-			case j := <-heavyJobs:
-				job = j
-			}
-		} else {
-			select {
-			case j := <-normalJobs:
-				job = j
-			case j := <-heavyJobs:
-				job = j
-			case bj := <-backgroundJobs:
-				backgroundJob = bj
-				// // Do background jobs separately
-				// worker.started = time.Now()
-				// gilState := C.PyGILState_Ensure()
-				// worker.HandleBackgroundJob(bj)
-				// C.PyGILState_Release(gilState)
-				// continue
-			}
-		}
+		job = GrabJobFromQueue()
 
-		worker.started = time.Now()
-		cpu_start := GetThreadCpuTime()
-
-		// Grab the GIL
-		gilState := C.PyGILState_Ensure()
-
-		pydone := make(chan bool, 1)
-		thread_id := C.PyThread_get_thread_ident()
-
-		if requestTimeout > 0 {
-			exc := C.PyExc_InterruptedError
-
-			//add a request timeout to kill the worker
-			go func() {
-				select {
-				case <-pydone:
-					return
-				// case <-job.req.Context().Done():
-				// 	// Other end hung up
-				// 	fmt.Println("Other end disconnected!")
-
-				// 	// Give the script a chance to exit cleanly
-				// 	time.Sleep(200 * time.Millisecond)
-
-				// 	select {
-				// 		case <-pydone:
-				// 			return
-				// 		default:
-				// 	}
-
-				// 	exc = C.PyExc_BrokenPipeError
-
-				case <-time.After(time.Duration(requestTimeout) * time.Second):
-					fmt.Println("Timed out!")
-
-					// flag worker as stuck, so we can detect whether our
-					// attempt at interrupting it hasn't worked
-					worker.stuck = true
-
-					// trigger a fancy traceback
-					syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
-					// wait for the traceback
-					time.Sleep(100 * time.Millisecond)
-				}
-
-				runtime.LockOSThread()
-				gs := C.PyGILState_Ensure()
-
-				if C.PyThreadState_SetAsyncExc(thread_id, exc) == 0 {
-					log.Println("Failed to issue InterruptedError to stuck worker!")
-				}
-
-				C.PyGILState_Release(gs)
-			}()
-		}
-
-		start := time.Now()
-		if job != nil {
+		finish, elapsed, cpu_elapsed := worker.RunPythonTask(func() {
 			worker.HandleJob(job)
-		} else {
-			worker.HandleBackgroundJob(backgroundJob)
-		}
+		}, requestTimeout)
 
-		worker.stuck = false
-		pydone <- true
 
-		C.PyGILState_Release(gilState)
-
-		finish := time.Now()
-		elapsed := finish.Sub(start).Milliseconds()
-		cpu_elapsed := GetThreadCpuTime() - cpu_start
-
-		if job == nil {
-			// was a background task, skip the rest
-			continue
-		}
-
-		job.done <- true
+		FlagJobFinished(job)
 
 		// could move this off this thread?
 		LogRequest(
@@ -194,9 +173,30 @@ func (worker *PythonWorker) Run() {
 		 	int(elapsed),
 			int(cpu_elapsed),
 		 	worker.number,
+			job.priority,
 		)
 
-		RecordPageStats(job.req.URL.Path+"?"+job.req.URL.RawQuery, elapsed)
+		RecordPageStats(job.req.URL.Path+"?"+job.req.URL.RawQuery, elapsed, cpu_elapsed)
+	}
+}
+
+func (worker *PythonWorker) BackgroundWorkerRun() {
+	runtime.LockOSThread()
+
+	// Pin all the threads to the same CPU, which should reduce the 'convoy problem' caused by the GIL
+	var cpuSet unix.CPUSet
+	unix.SchedGetaffinity(0, &cpuSet)
+	cpuCount := cpuSet.Count()
+	cpuSet.Zero()
+	cpuSet.Set(process % cpuCount)
+	unix.SchedSetaffinity(0, &cpuSet)
+
+	for {
+		backgroundJob := <-backgroundJobs
+
+		worker.RunPythonTask(func() {
+			worker.HandleBackgroundJob(backgroundJob)
+		}, 3600)
 	}
 }
 

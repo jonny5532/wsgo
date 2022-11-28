@@ -15,6 +15,12 @@ func CanAccelResponse(job *Job) bool {
 		job.w.Header().Del("X-Accel-Redirect")
 		return true
 	}
+
+	// if v := job.w.Header().Get("X-WSGo-Async"); v!="" {
+	// 	job.asyncId = v
+	// 	job.w.Header().Del("X-WSGo-Async")
+	// 	return true
+	// }
 	return false
 }
 

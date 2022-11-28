@@ -112,7 +112,7 @@ func TryCache(w http.ResponseWriter, req *http.Request) TryCacheResponse {
 
 			atomic.AddUint64(&cached.hits, 1)
 
-			if cached.expiry.Sub(now) < (30 * time.Second) {
+			if cached.expiry.Sub(now) < (time.Duration(maxAgeBeforeRefetch) * time.Second) {
 				return HIT_BUT_EXPIRING_SOON
 			}
 

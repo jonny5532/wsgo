@@ -21,60 +21,43 @@ import (
 import "C"
 
 
-type Job struct {
-	w          http.ResponseWriter
-	statusCode int
-	req        *http.Request
-	r          io.Reader
-	done       chan bool
-
-	// X-SendFile / X-Accel-Redirect file
-	sendFile   string
-}
-
 type BackgroundJob struct {
 	function *C.PyObject
 }
 
-var normalJobs chan *Job
-var heavyJobs chan *Job
+//var normalJobs chan *Job
+//var heavyJobs chan *Job
 var backgroundJobs chan *BackgroundJob
 
 var server *http.Server
 
 func init() {
-	// All job queues are blocking to avoid 'bufferbloat'
-	normalJobs = make(chan *Job, 0)
-	heavyJobs = make(chan *Job, 0)
 	backgroundJobs = make(chan *BackgroundJob, 0)
 }
 
-func IsRequestHeavy(req *http.Request) bool {
-	for _, prefix := range heavyPrefixes {
-		if strings.HasPrefix(req.URL.Path, prefix) {
-			return true
-		}
-	}
-
+func DetermineRequestPriority(req *http.Request) int {
+	ret := 0
 	ua := strings.ToLower(req.Header.Get("User-agent"))
-	for _, uas := range []string{"facebook", "bot", "crawler"} {
+	for _, uas := range []string{"facebook", "bot", "crawler", "spider"} {
 		if strings.Contains(ua, uas) {
-			return true
+			ret -= 1000
+			break
 		}
-	}
-
-	lastTime := GetWeightedLoadTime(req.URL.Path + "?" + req.URL.RawQuery)
-	if lastTime >= slowResponseThreshold {
-		// was slow last time
-		return true
 	}
 
 	if req.URL.RawQuery != "" {
 		// demote anything with a query string
-		return true
+		ret -= 50
 	}
 
-	return false
+	lastTime := GetWeightedCpuTime(req.URL.Path + "?" + req.URL.RawQuery)
+	if lastTime > -1 {
+		ret += int(200 - lastTime)
+	}
+
+	ret -= GetActiveRequestsBySource(GetRemoteAddr(req))*800
+
+	return ret
 }
 
 func Serve(w http.ResponseWriter, req *http.Request) {
@@ -91,6 +74,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 			0,
 			0,
 			0,
+			0,
 		)
 		return
 	}
@@ -100,15 +84,13 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		log.Fatalln("All worker threads are stuck, quitting!")
 	}
 
-	isHeavy := IsRequestHeavy(req)
-
 	var cw *CacheWriter
 
 	if maxAge > 0 && pageCacheLimit > 0 && (req.Method == "GET" || req.Method == "HEAD" || req.Method == "OPTIONS") {
 		// We might be able to cache this
 		if alreadyResponded {
 			cw = NewCacheOnlyCacheWriter()
-			isHeavy = true
+			//isHeavy = true
 		} else {
 			cw = NewCacheWriter(w)
 		}
@@ -131,28 +113,27 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		requestReader = NewBufferingReader(req.Body, reqBufLen)
 	}
 
+	priority := DetermineRequestPriority(req)
+
 	job := &Job{
-		w:    cw,
-		req:  req,
-		r:	  requestReader,
-		done: make(chan bool),
+		w:        cw,
+		req:      req,
+		r:	      requestReader,
+		done:     make(chan bool, 1),
+		priority: priority,
+		isSlow:   priority < 0,
 	}
 
-	if isHeavy {
-		// could drop heavy queries if the handlers are too backlogged?
-		select {
-		case heavyJobs <- job:
-		// 	//
-		// case <-time.After(time.Duration(5) * time.Second):
-		// 	// heavy job timeout?
-		// 	http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
-		// 	return
-		}		
-	} else {
-		normalJobs <- job
-	}
+	AddJobToQueue(job)
+
 	// wait for a worker thread to handle the job
-	<-job.done
+	select {
+	case <-job.done:
+	case <-time.After(time.Duration(requestTimeout*2) * time.Second):
+		// if we're very backlogged, a job might never get handled before the timeout
+		log.Println("Job timed out without being handled!")
+		// TODO: remove job from queue
+	}
 
 	ResolveAccel(job)
 

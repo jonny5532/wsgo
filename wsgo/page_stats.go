@@ -6,6 +6,7 @@ import (
 
 type PageStat struct {
 	responseTimes RollingAverage //in milliseconds
+	cpuTimes RollingAverage
 }
 
 var pageStats map[string]*PageStat
@@ -15,7 +16,7 @@ func init() {
 	pageStats = make(map[string]*PageStat)
 }
 
-func RecordPageStats(url string, timeMillis int64) {
+func RecordPageStats(url string, responseTimeMillis int64, cpuTimeMillis int64) {
 	pageStatsMutex.Lock()
 	var stat *PageStat
 	if pageStats[url] != nil {
@@ -23,16 +24,18 @@ func RecordPageStats(url string, timeMillis int64) {
 	} else {
 		stat = &PageStat{
 			responseTimes: NewRollingAverage(),
+			cpuTimes: NewRollingAverage(),
 		}
 	}
 
-	stat.responseTimes.Add(timeMillis)
+	stat.responseTimes.Add(responseTimeMillis)
+	stat.cpuTimes.Add(cpuTimeMillis)
 
 	pageStats[url] = stat
 	pageStatsMutex.Unlock()
 }
 
-func GetWeightedLoadTime(url string) int64 {
+func GetWeightedResponseTime(url string) int64 {
 	pageStatsMutex.Lock()
 	defer pageStatsMutex.Unlock()
 	stat := pageStats[url]
@@ -42,4 +45,16 @@ func GetWeightedLoadTime(url string) int64 {
 	}
 
 	return stat.responseTimes.GetFilteredMax()
+}
+
+func GetWeightedCpuTime(url string) int64 {
+	pageStatsMutex.Lock()
+	defer pageStatsMutex.Unlock()
+	stat := pageStats[url]
+	if stat == nil {
+		//no time found
+		return -1
+	}
+
+	return stat.cpuTimes.GetFilteredMax()
 }

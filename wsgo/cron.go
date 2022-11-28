@@ -109,8 +109,7 @@ func CronTick() {
 	now := time.Now()
 	for i, cron := range crons {
 		if now.After(cron.nextRun) {
-			// time to run!
-			//log.Println("Cron: running", cron.name)
+			// Unbuffered channel, so cron will block
 			backgroundJobs <- &BackgroundJob{function: cron.function}
 			crons[i].nextRun = crons[i].calculateNextRun()
 		}
