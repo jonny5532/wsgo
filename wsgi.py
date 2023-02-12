@@ -59,4 +59,12 @@ def application(env, start_response):
     ])
     return [("The time is %s!"%(datetime.datetime.now())).encode('utf-8')]
 
+run_at = datetime.datetime.now() - datetime.timedelta(seconds=60)
+
+@wsgo.cron(run_at.minute, run_at.hour, -1, -1, 0)
+@blah
+def cron_test():
+    print("cron!")
+
+
 data = {'hi':'there'}

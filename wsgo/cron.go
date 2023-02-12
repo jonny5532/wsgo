@@ -40,7 +40,7 @@ func AddCron(function *C.PyObject, period int, min int, hour int, day int, mon i
 		hour:     hour,
 		day:      day,
 		mon:      mon,
-		wday:     wday,
+		wday:     wday % 7,
 		function: function,
 	}
 
@@ -162,11 +162,6 @@ func (cron *Cron) calculateNextRun() time.Time {
 		0, 0, now.Location(),
 	)
 
-	// handle wday - BROKEN
-	// if cron.wday > -1 && nextRun.Weekday() != (cron.wday%7) {
-	// 	nextRun := nextRun.AddDate(0, 0, (7+cron.wday-nextRun.Weekday())%7)
-	// }
-
 	// nextRun is currently in the past, so try advancing the minute (if it isn't specified)
 
 	if !nextRun.After(now) && cron.min == -1 {
@@ -238,7 +233,17 @@ func (cron *Cron) calculateNextRun() time.Time {
 		)
 	}
 
-	// ignore wday for now
+    // if a weekday is specified, and nextRun isn't on it (or is in the past)
+
+	if cron.wday != -1 && (cron.wday != int(nextRun.Weekday()) || !nextRun.After(now)) {
+		daysToAdd := cron.wday - int(nextRun.Weekday())
+
+		if daysToAdd <= 0 {
+			daysToAdd += 7
+		}
+
+		nextRun = nextRun.AddDate(0, 0, daysToAdd)
+	}
 
 	return nextRun
 }
