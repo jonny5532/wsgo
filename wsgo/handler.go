@@ -118,7 +118,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	job := &Job{
 		w:        cw,
 		req:      req,
-		r:	      requestReader,
+		r:	    requestReader,
 		done:     make(chan bool, 1),
 		priority: priority,
 		isSlow:   priority < 0,
