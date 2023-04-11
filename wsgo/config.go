@@ -40,6 +40,7 @@ var process int = 0
 var bindAddress string = ":8000"
 var wsgiModule string = "wsgi_app"
 var requestTimeout int = 60
+var backgroundTimeout int = 1800
 var slowResponseThreshold int64 = 1000
 var requestBufferLength int = 1048576
 // response buffering involves an extra copy so often isn't a performance gain

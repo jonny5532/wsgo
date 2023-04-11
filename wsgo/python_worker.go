@@ -194,9 +194,24 @@ func (worker *PythonWorker) BackgroundWorkerRun() {
 	for {
 		backgroundJob := <-backgroundJobs
 
+
 		worker.RunPythonTask(func() {
+			finished := make(chan bool, 1)
+
+			go func() {
+				select {
+				case <-finished:
+					return
+				case <-time.After(time.Duration(backgroundTimeout + 10) * time.Second):
+					log.Fatalln("Background worker permanently stuck, quitting!")
+				}
+			}()
+
 			worker.HandleBackgroundJob(backgroundJob)
-		}, 3600)
+
+			finished <- true
+		}, backgroundTimeout)
+
 	}
 }
 
