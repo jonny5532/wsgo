@@ -8,8 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
-    "syscall"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/projecthunt/reuseable"
@@ -25,39 +25,13 @@ type BackgroundJob struct {
 	function *C.PyObject
 }
 
-//var normalJobs chan *Job
-//var heavyJobs chan *Job
 var backgroundJobs chan *BackgroundJob
+var backgroundJobActive sync.Mutex
 
 var server *http.Server
 
 func init() {
 	backgroundJobs = make(chan *BackgroundJob, 0)
-}
-
-func DetermineRequestPriority(req *http.Request) int {
-	ret := 0
-	ua := strings.ToLower(req.Header.Get("User-agent"))
-	for _, uas := range []string{"facebook", "bot", "crawler", "spider"} {
-		if strings.Contains(ua, uas) {
-			ret -= 1000
-			break
-		}
-	}
-
-	if req.URL.RawQuery != "" {
-		// demote anything with a query string
-		ret -= 50
-	}
-
-	lastTime := GetWeightedCpuTime(req.URL.Path + "?" + req.URL.RawQuery)
-	if lastTime > -1 {
-		ret += int(200 - lastTime)
-	}
-
-	ret -= GetActiveRequestsBySource(GetRemoteAddr(req))*800
-
-	return ret
 }
 
 func Serve(w http.ResponseWriter, req *http.Request) {
@@ -113,27 +87,14 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		requestReader = NewBufferingReader(req.Body, reqBufLen)
 	}
 
-	priority := DetermineRequestPriority(req)
-
-	job := &Job{
+	job := &RequestJob{
 		w:        cw,
 		req:      req,
-		r:	    requestReader,
+		r:	      requestReader,
 		done:     make(chan bool, 1),
-		priority: priority,
-		isSlow:   priority < 0,
 	}
 
-	AddJobToQueue(job)
-
-	// wait for a worker thread to handle the job
-	select {
-	case <-job.done:
-	case <-time.After(time.Duration(requestTimeout*2) * time.Second):
-		// if we're very backlogged, a job might never get handled before the timeout
-		log.Println("Job timed out without being handled!")
-		// TODO: remove job from queue
-	}
+	scheduler.HandleJob(job, time.Duration(requestTimeout*2) * time.Second)
 
 	ResolveAccel(job)
 
@@ -189,6 +150,10 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
         sig := <-sigs
         log.Println("Process", process, "got", sig, "signal, shutting down...")
 		server.Shutdown(context.Background())
+
+		// grab the background job mutex, to wait on any currently running job
+		backgroundJobActive.Lock()
+
 		shuttingDown <- true
     }()
 

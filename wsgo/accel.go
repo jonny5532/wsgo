@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-func CanAccelResponse(job *Job) bool {
+func CanAccelResponse(job *RequestJob) bool {
 	if v := job.w.Header().Get("X-Sendfile"); v!="" {
 		job.sendFile = v
 		job.w.Header().Del("X-Sendfile")
@@ -24,7 +24,7 @@ func CanAccelResponse(job *Job) bool {
 	return false
 }
 
-func ResolveAccel(job *Job) {
+func ResolveAccel(job *RequestJob) {
 	if job.sendFile != "" {
 		// this will always produce a 2xx response irrespective of the original statusCode
 		http.ServeFile(job.w, job.req, job.sendFile)

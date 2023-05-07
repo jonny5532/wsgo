@@ -3,9 +3,9 @@ FROM golang:1.20-bullseye
 RUN apt-get update && apt-get install build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libsqlite3-dev libreadline-dev libffi-dev curl libbz2-dev -y
 
 ARG PY_MAJ=3
-ARG PY_MIN=8
-ARG PY_PCH=12
-ARG PY_PKGCONFIG=python-3.8-embed
+ARG PY_MIN=10
+ARG PY_PCH=11
+ARG PY_PKGCONFIG=python-3.10-embed
 
 RUN cd /tmp \
  && wget -O python.tar.gz https://www.python.org/ftp/python/${PY_MAJ}.${PY_MIN}.${PY_PCH}/Python-${PY_MAJ}.${PY_MIN}.${PY_PCH}.tgz \

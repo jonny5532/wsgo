@@ -28,6 +28,9 @@ func (r *RollingAverage) Add(sample int64) {
 }
 
 func (r *RollingAverage) GetFilteredMax() int64 {
+	if len(r.samples)==0 {
+		return 0
+	}
 	samples := append([]int64{}, r.samples...)
 	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 	ind := (3 * len(samples)) / 4 // take 75th percentile

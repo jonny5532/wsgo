@@ -1,6 +1,7 @@
 package wsgo
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 )
@@ -10,6 +11,7 @@ type CacheWriter struct {
 	cacheHeader   http.Header
 	skipCaching   bool //don't bother trying to cache the response (wrong type or too big)
 	doneBuffering bool
+	finished      bool
 	statusCode    int
 	buf           []byte
 }
@@ -68,6 +70,10 @@ func (cw *CacheWriter) WriteOld(b []byte) (int, error) {
 
 func (cw *CacheWriter) Write(b []byte) (int, error) {
 	// TODO - make this simpler
+
+	if cw.finished {
+		return 0, errors.New("Response already finished.")
+	}
 
 	// algorithm:
 
@@ -164,10 +170,19 @@ func (cw *CacheWriter) Write(b []byte) (int, error) {
 // }
 
 func (cw *CacheWriter) Flush() error {
+	if cw.finished {
+		return nil
+	}
+	cw.finished = true
+
 	if cw.writer == nil || cw.doneBuffering {
 		return nil
 	}
 
+	if cw.statusCode==0 {
+		// header was never written?
+		return nil
+	}
 
 	cw.writer.WriteHeader(cw.statusCode)
 	_, err := cw.writer.Write(cw.buf)
@@ -176,6 +191,9 @@ func (cw *CacheWriter) Flush() error {
 }
 
 func (cw *CacheWriter) WriteHeader(statusCode int) {
+	if cw.finished {
+		return
+	}
 	if cw.doneBuffering && cw.writer != nil {
 //	if cw.writer != nil {
 		cw.writer.WriteHeader(statusCode)

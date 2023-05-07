@@ -152,18 +152,16 @@ func (worker *PythonWorker) Run() {
 	//log.Println("Worker", strconv.Itoa(process)+":"+strconv.Itoa(worker.number), "started!")
 
 	for {
-		var job *Job
-
 		worker.started = time.Time{} //?
 
-		job = GrabJobFromQueue()
+		job := scheduler.GrabJob()
 
 		finish, elapsed, cpu_elapsed := worker.RunPythonTask(func() {
 			worker.HandleJob(job)
 		}, requestTimeout)
 
 
-		FlagJobFinished(job)
+		scheduler.JobFinished(job, elapsed, cpu_elapsed)
 
 		// could move this off this thread?
 		LogRequest(
@@ -193,7 +191,7 @@ func (worker *PythonWorker) BackgroundWorkerRun() {
 
 	for {
 		backgroundJob := <-backgroundJobs
-
+		backgroundJobActive.Lock()
 
 		worker.RunPythonTask(func() {
 			finished := make(chan bool, 1)
@@ -212,10 +210,11 @@ func (worker *PythonWorker) BackgroundWorkerRun() {
 			finished <- true
 		}, backgroundTimeout)
 
+		backgroundJobActive.Unlock()
 	}
 }
 
-func (worker *PythonWorker) HandleJob(job *Job) {
+func (worker *PythonWorker) HandleJob(job *RequestJob) {
 	requestId := atomic.AddInt64(&lastRequestId, 1)
 
 	AddWsgiRequestReader(requestId, job.r)
