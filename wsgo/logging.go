@@ -24,7 +24,7 @@ func GetRemoteAddr(req *http.Request) string {
 		remoteAddr = remoteAddr[:remoteAddrColonIndex]
 	}
 	return firstNonEmpty(
-		strings.Split(req.Header.Get("X-Forwarded-For"), ", ")[0],
+		strings.TrimSpace(strings.Split(req.Header.Get("X-Forwarded-For"), ",")[0]),
 		remoteAddr,
 		"-",
 	)

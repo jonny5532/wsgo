@@ -26,16 +26,30 @@ type FancyScheduler struct {
 	activeRequestsBySourceMutex sync.Mutex
 
 	requestsBySource *lru.TwoQueueCache[string, RequestCount]
+	cpuTimeByUrl *lru.TwoQueueCache[string, *RollingAverage]
 
 	activeRequests  atomic.Int32
 }
 
-func (sched *FancyScheduler) HandleJob(job *RequestJob, timeout time.Duration) error {//, done chan bool) {
+func (sched *FancyScheduler) HandleJob(job *RequestJob, timeout time.Duration) error {
+	notify := true
+
 	sched.jobQueueMutex.Lock()
 	sched.jobQueue = append(sched.jobQueue, job)
+	if len(sched.jobQueue) > maxQueueLength {
+		// queue is now too long, we can either drop this request, or better, drop the lowest prio request?
+		job, jobIndex := sched.GetLowestPriorityJob()
+		sched.jobQueue = append(sched.jobQueue[:jobIndex], sched.jobQueue[jobIndex+1:]...)
+		job.w.WriteHeader(504)
+		job.w.Write([]byte("Gateway Timeout"))
+		job.done <- true
+		notify = false
+	}
 	sched.jobQueueMutex.Unlock()
 
-	sched.jobsWaiting <- true
+	if notify {
+		sched.jobsWaiting <- true
+	}
 
 	// this is ugly?
 	ctx := job.req.Context()
@@ -84,13 +98,20 @@ func (sched *FancyScheduler) CalculateJobPriority(job *RequestJob) int {
 		priority -= 500
 	}
 
-	ra := GetRemoteAddr(job.req)
+	cpuAvg, _ := sched.cpuTimeByUrl.Get(job.req.RequestURI)
+	if cpuAvg != nil {
+		priority -= int(cpuAvg.GetFilteredMax()*10)
+	}
+
+	// TODO - also demote long-response-time requests? but don't want to make long-polling impossible?
+
+	remoteAddr := GetRemoteAddr(job.req)
 
 	sched.activeRequestsBySourceMutex.Lock()
-	priority -= 1000*sched.activeRequestsBySource[ra]
+	priority -= 1000*sched.activeRequestsBySource[remoteAddr]
 	sched.activeRequestsBySourceMutex.Unlock()
 
-	r := sched.GetAgedRequestCount(ra)
+	r := sched.GetAgedRequestCount(remoteAddr)
 	priority -= int(200*r.count)
 
 	return priority
@@ -100,9 +121,21 @@ func (sched *FancyScheduler) GetHighestPriorityJob() (*RequestJob, int) {
 	var job *RequestJob
 	jobIndex := -1
 	for k, j := range sched.jobQueue {
-		// weird to save it back each time?
 		j.priority = sched.CalculateJobPriority(j)
 		if (job == nil || j.priority > job.priority) {
+			job = j
+			jobIndex = k
+		}
+	}
+	return job, jobIndex
+}
+
+func (sched *FancyScheduler) GetLowestPriorityJob() (*RequestJob, int) {
+	var job *RequestJob
+	jobIndex := -1
+	for k, j := range sched.jobQueue {
+		j.priority = sched.CalculateJobPriority(j)
+		if (job == nil || j.priority < job.priority) {
 			job = j
 			jobIndex = k
 		}
@@ -180,6 +213,14 @@ func (sched *FancyScheduler) JobFinished(job *RequestJob, elapsed int64, cpu_ela
 	}
 	sched.activeRequestsBySourceMutex.Unlock()
 
+	r, _ := sched.cpuTimeByUrl.Get(job.req.RequestURI)
+	if r == nil {
+		nr := NewRollingAverage()
+		r = &nr
+		sched.cpuTimeByUrl.Add(job.req.RequestURI, r)
+	}
+	r.Add(cpu_elapsed)
+
 	job.done <- true
 }
 
@@ -188,9 +229,15 @@ func NewFancyScheduler() *FancyScheduler {
 	if err != nil {
 		log.Fatalln(err)
 	}
+	cpuTimeByUrl, err := lru.New2Q[string, *RollingAverage](16384)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
 	return &FancyScheduler{
-		jobsWaiting: make(chan bool, 128),
+		jobsWaiting: make(chan bool, maxQueueLength),
 		activeRequestsBySource: make(map[string]int),
 		requestsBySource: requestsBySource,
+		cpuTimeByUrl: cpuTimeByUrl,
 	}
 }

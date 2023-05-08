@@ -134,8 +134,6 @@ func (cron *Cron) calculateNextRun() time.Time {
 		return now.Add(cron.period)
 	}
 
-	// FIXME - wday doesn't work yet
-
 	if false {
 		// for testing
 		now = time.Date(

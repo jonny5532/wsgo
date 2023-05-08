@@ -33,15 +33,13 @@ func (i *heavyPrefix) Set(value string) error {
 }
 
 var totalWorkers int = 16     //total number of worker threads
-var heavyWorkers int = 2      //number of worker threads that are allowed to do heavy tasks
-var backgroundWorkers int = 1 //number of heavy workers that can also do background tasks
 var processes int = 1
 var process int = 0
 var bindAddress string = ":8000"
 var wsgiModule string = "wsgi_app"
 var requestTimeout int = 60
 var backgroundTimeout int = 1800
-var slowResponseThreshold int64 = 1000
+var maxQueueLength int = 128
 var requestBufferLength int = 1048576
 // response buffering involves an extra copy so often isn't a performance gain
 var responseBufferLength int = 0 //1048576
@@ -50,14 +48,11 @@ var maxAgeBeforeRefetch int = 0
 var pageCacheLimit uint64 = 67108864
 var staticMap staticMapping
 var staticMaxAge int = 86400
-var heavyPrefixes heavyPrefix
 
 func ParseFlags() {
 	flag.IntVar(&totalWorkers, "workers", totalWorkers, "total number of worker threads")
-	flag.IntVar(&heavyWorkers, "heavy", heavyWorkers, "number of heavy job threads")
-//	flag.IntVar(&backgroundWorkers, "background", backgroundWorkers, "number of background threads")
 	flag.IntVar(&processes, "processes", processes, "number of processes")
-	flag.IntVar(&process, "process", process, "process number")
+	flag.IntVar(&process, "process", process, "process number (internal)")
 	flag.StringVar(&wsgiModule, "module", wsgiModule, "WSGI module to serve")
 	flag.StringVar(&bindAddress, "http-socket", bindAddress, "server bind address")
 	flag.IntVar(&requestTimeout, "request-timeout", requestTimeout, "request timeout in seconds")
@@ -66,6 +61,5 @@ func ParseFlags() {
 	flag.Uint64Var(&pageCacheLimit, "cache-size", pageCacheLimit, "maximum size of page cache in bytes")
 	flag.Var(&staticMap, "static-map", "static file folder mapping")
 	flag.IntVar(&staticMaxAge, "static-max-age", staticMaxAge, "encourage clients to cache static files for this many seconds (0 to disable)")
-	flag.Var(&heavyPrefixes, "heavy-prefix", "demote certain URL prefixes as heavy")
 	flag.Parse()
 }

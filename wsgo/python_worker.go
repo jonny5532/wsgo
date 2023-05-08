@@ -22,9 +22,6 @@ import (
 import "C"
 
 type PythonWorker struct {
-	normalOnly    bool
-	nonBackground bool
-
 	number  int
 	started time.Time
 	stuck   bool
@@ -52,8 +49,6 @@ func StartWorkers() {
 	for i := 0; i < totalWorkers; i++ {
 		workers[i] = &PythonWorker{
 			number:        i + 1,
-			normalOnly:    (i >= heavyWorkers),
-			nonBackground: (i >= backgroundWorkers),
 		}
 		go workers[i].Run()
 	}
@@ -173,8 +168,6 @@ func (worker *PythonWorker) Run() {
 		 	worker.number,
 			job.priority,
 		)
-
-		RecordPageStats(job.req.URL.Path+"?"+job.req.URL.RawQuery, elapsed, cpu_elapsed)
 	}
 }
 
