@@ -1,12 +1,16 @@
 package wsgo
 
 import (
+	"errors"
 	"io"
 )
 
 type BufferingReader struct {
 	r io.Reader
 	buf []byte
+	initial []byte
+	// whether `initial` holds the entire request or not
+	partial bool
 }
 
 func NewBufferingReader(r io.Reader, bufLen int) *BufferingReader {
@@ -18,6 +22,7 @@ func NewBufferingReader(r io.Reader, bufLen int) *BufferingReader {
 	buf := make([]byte, bufLen)
 	n, _ := io.ReadFull(r, buf)
 	b.buf = buf[:n]
+	b.initial = b.buf
 	return b
 }
 
@@ -30,6 +35,9 @@ func (b *BufferingReader) Read(p []byte) (int, error) {
 		if to_read < len(p) {
 			// Still some room left in the buffer, so read some more
 			n, err := b.r.Read(p[to_read:len(p)])
+			if n > 0 {
+				b.partial = true
+			}
 			return to_read + n, err
 		}
 
@@ -37,5 +45,17 @@ func (b *BufferingReader) Read(p []byte) (int, error) {
 	}
 
 	n, err := b.r.Read(p)
+	if n > 0 {
+		b.partial = true
+	}
 	return n, err
+}
+
+func (b *BufferingReader) Rewind() error {
+	if b.partial {
+		return errors.New("BufferingReader is not complete.")
+	}
+
+	b.buf = b.initial
+	return nil
 }

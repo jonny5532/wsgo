@@ -15,14 +15,25 @@ lock = threading.Lock()
 
 
 def application(env, start_response):
+	if env['PATH_INFO']=='/notify':
+		wsgo.notify_retry("12345")
+		start_response('200 OK', [
+			('Content-Type','text/html'),
+		])
+		return [b"notified!"]
+
 	time.sleep(1)
+
+	print('env is', env)
+
 	start_response('200 OK', [
 		('Content-Type','text/html'),
-		('X-WSGo-Async','12345'),
+		('X-WSGo-Retry','12345'),
 	])
-	for i in range(100000):
-		x = i+2
-	time.sleep(1)
+	# for i in range(100000):
+	# 	x = i+2
+	# time.sleep(1)
+	print('gonna return hello world?')
 	return [b"Hello World"]
 
 @wsgo.timer(10)

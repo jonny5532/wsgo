@@ -96,7 +96,9 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 
 	scheduler.HandleJob(job, time.Duration(requestTimeout*2) * time.Second)
 
-	ResolveAccel(job)
+	if ResolveAccel(job) {
+		return
+	}
 
 	cw.Flush()
 

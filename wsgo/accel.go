@@ -16,17 +16,26 @@ func CanAccelResponse(job *RequestJob) bool {
 		return true
 	}
 
-	// if v := job.w.Header().Get("X-WSGo-Async"); v!="" {
-	// 	job.asyncId = v
-	// 	job.w.Header().Del("X-WSGo-Async")
-	// 	return true
-	// }
+	if v := job.w.Header().Get("X-WSGo-Retry"); v!="" {
+		job.w.Header().Del("X-WSGo-Retry")
+		// retrying only allowed if we're not already handling a retry
+		if job.req.Header.Get("X-WSGo-Retry") != "" {
+		 	job.retryId = v
+			return true
+		}
+	}
 	return false
 }
 
-func ResolveAccel(job *RequestJob) {
+func ResolveAccel(job *RequestJob) bool {
 	if job.sendFile != "" {
 		// this will always produce a 2xx response irrespective of the original statusCode
 		http.ServeFile(job.w, job.req, job.sendFile)
+		return true
 	}
+	if job.retryId != "" {
+		DoRetry(job)
+		return true
+	}
+	return false
 }

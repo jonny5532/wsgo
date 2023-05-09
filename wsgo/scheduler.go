@@ -18,14 +18,11 @@ type RequestJob struct {
 
 	// does it make sense for priority to be externally visible? it's really an internal concern of schedulers?
 	priority   int
-	//isSlow     bool
 
 	// X-SendFile / X-Accel-Redirect file
 	sendFile   string
 
-	// for asynchronous responses
-	//asyncId    string
-	//asyncDone  chan bool
+	retryId    string
 }
 
 type Scheduler interface {
