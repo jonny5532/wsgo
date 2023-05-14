@@ -24,7 +24,7 @@ int _PyIter_Check(PyObject *o) {
 extern void go_wsgi_start_response(long request_id, const char* status, int status_len, const char** header_parts, int* header_part_lengths, int headers_size);
 extern PyObject *go_wsgi_read_request(long request_id, long to_read);
 extern void go_add_cron(PyObject *func, long period, long min, long hour, long day, long mon, long wday);
-extern void go_notify_retry(const char* retry_id, int retry_id_len);
+extern void go_notify_parked(const char* parked_id, int parked_id_len, int action, const char* param, int param_len);
 
 
 // _PyCFunctionFast signature
@@ -209,13 +209,25 @@ static PyObject* wsgo_add_cron(PyObject *self, PyObject **args, Py_ssize_t nargs
 }
 
 // _PyCFunctionFast signature
-static PyObject* wsgo_notify_retry(PyObject *self, PyObject **args, Py_ssize_t nargs)
+static PyObject* wsgo_notify_parked(PyObject *self, PyObject **args, Py_ssize_t nargs)
 {
-	if(nargs==1) {
-		Py_ssize_t retry_id_len;
-		const char *retry_id = PyUnicode_AsUTF8AndSize(args[0], &retry_id_len);
+	if(nargs==3) {
+		Py_ssize_t parked_id_len;
+		const char *parked_id = PyUnicode_AsUTF8AndSize(args[0], &parked_id_len);
 
-		go_notify_retry(retry_id, retry_id_len);
+		int action = PyLong_AsLong(args[1]);
+
+		Py_ssize_t param_len;
+		const char *param;
+
+		if(PyUnicode_Check(args[2])) {
+			param = PyUnicode_AsUTF8AndSize(args[2], &param_len);
+		} else {
+			param_len = 0;
+			param = 0;
+		}
+
+		go_notify_parked(parked_id, parked_id_len, action, param, param_len);
 	}
 
 	Py_IncRef(Py_None);
@@ -224,7 +236,7 @@ static PyObject* wsgo_notify_retry(PyObject *self, PyObject **args, Py_ssize_t n
 
 static PyMethodDef WsgoMethods[] = {
 	{"add_cron", (PyCFunction)wsgo_add_cron, METH_FASTCALL, "Registers a cron handler"},
-	{"notify_retry", (PyCFunction)wsgo_notify_retry, METH_FASTCALL, "Notifies a waiting retry"},
+	{"notify_parked", (PyCFunction)wsgo_notify_parked, METH_FASTCALL, "Notifies a parked job"},
 	{NULL, NULL, 0, NULL}
 };
 

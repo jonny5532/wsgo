@@ -16,11 +16,11 @@ func CanAccelResponse(job *RequestJob) bool {
 		return true
 	}
 
-	if v := job.w.Header().Get("X-WSGo-Retry"); v!="" {
-		job.w.Header().Del("X-WSGo-Retry")
+	if v := job.w.Header().Get("X-WSGo-Park"); v!="" {
+		//job.w.Header().Del("X-WSGo-Retry")
 		// retrying only allowed if we're not already handling a retry
-		if job.req.Header.Get("X-WSGo-Retry") != "" {
-		 	job.retryId = v
+		if job.req.Header.Get("X-WSGo-Park") == "" {
+		 	job.parkedId = v
 			return true
 		}
 	}
@@ -33,8 +33,8 @@ func ResolveAccel(job *RequestJob) bool {
 		http.ServeFile(job.w, job.req, job.sendFile)
 		return true
 	}
-	if job.retryId != "" {
-		DoRetry(job)
+	if job.parkedId != "" {
+		ParkJob(job)
 		return true
 	}
 	return false

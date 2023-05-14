@@ -195,7 +195,6 @@ func (cw *CacheWriter) WriteHeader(statusCode int) {
 		return
 	}
 	if cw.doneBuffering && cw.writer != nil {
-//	if cw.writer != nil {
 		cw.writer.WriteHeader(statusCode)
 	}
 	contentLength, err := strconv.Atoi(cw.Header().Get("Content-length"))

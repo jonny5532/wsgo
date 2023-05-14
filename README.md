@@ -142,6 +142,14 @@ def runs_at_half_past_every_hour():
 If you are using multi-process mode, these will only be activated in the first process.
 
 
+## Asynchronous retry
+
+An asynchronous 'Retry' mechanism allows workers to return immediately, but leaves the request hanging without a response having been sent. A later call to `wsgo.notify_retry` from a different thread within the same process can then wake the hanging request and cause it to be processed again.
+
+This allows long-running requests (such as long-polls) to be queued up without using up a worker each. 
+
+
+
 # Background
 
 This project is heavily inspired by uWSGI, which the author has successfully used in production for many years. However it has some drawbacks:

@@ -22,7 +22,7 @@ type RequestJob struct {
 	// X-SendFile / X-Accel-Redirect file
 	sendFile   string
 
-	retryId    string
+	parkedId    string
 }
 
 type Scheduler interface {
