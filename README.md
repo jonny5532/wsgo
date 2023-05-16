@@ -30,6 +30,7 @@ Then either run `pip install <dist/file.whl>` to install `wsgo` in your bin fold
 - Static file serving
 - Request prioritisation (by URL prefix, request properties, and previous response times)
 - Cron-like system for running background tasks
+- Request parking mechanism to support long-polling
 
 
 ## Caveats
@@ -41,7 +42,7 @@ Then either run `pip install <dist/file.whl>` to install `wsgo` in your bin fold
 
 ## Known issues
 
-- The `wsgi.input` file-like object only implements the `read(...)` method (this is enough for Django).
+- The `wsgi.input` file-like object only implements the `read(n)` and `readline()` methods (this is enough for Django).
 - It can't yet be built via the regular `python setup.py compile` mechanism.
 
 
@@ -62,8 +63,6 @@ Due to the Python Global Interpreter Lock (GIL), only one thread can run at a ti
 The most appropriate number of threads will depend on your application. An app that makes lots of disk or network accesses will likely be IO bound and benefit from multiple threads, as useful work can be done whilst some threads are blocked waiting for IO to complete. However an app that is primarily CPU bound would be better with fewer threads, as more threads will incur unnecessary context switches and cache misses for little benefit.
 
 Threads carry some overhead - at least 8mb RAM per thread for the stack, as well as any thread-local resources such as open database connections. Beware of hitting MySQL's 150 or PostgreSQL's 100 default maximum connections.
-
-
 
 
 ## Timeouts
@@ -106,19 +105,20 @@ A useful strategy is to add middleware to your application to add appropriate ca
 
 ## Request prioritisation
 
-```
- --heavy <number of worker threads>       (default 2)
-```
+Incoming requests are assigned a priority, and higher priority tasks will be served before lower ones, even if the lower one came in first.
 
-Requests are classified into two tiers - normal and heavy. Normal requests can be handled by any of the worker threads, whereas heavy requests are limited to a subset of worker threads (2 by default, configurable with `--heavy`), so will queue up if those workers are busy. This avoids slow endpoints bogging down the server and denying access to the normal ones.
+Requests with a priority below a hardcoded threshold (currently -7000) will only run if no other workers are busy. Requests may time out without being handled, if the queue never emptied and their priority was insufficient for them to run within their request timeout.
 
-Requests are classified according to several criteria:
+The priority of a request is calculated as follows:
 
-- The response time of previous requests is stored. Any request to a URL where the 75th percentile of the past response times is over the _slow response threshold_ (1000ms by default) will be considered heavy.
+- All requests start with a priority of 1000
+- Anything with a query string: -500
+- Each concurrent request from the same IP: -1000
+- Each historic request from the same IP: -200 (decays by +200/second)
+- User-Agent containing bot/crawler/spider/index: -8000
+- Each millisecond of average CPU time for same request URI: -10
 
-- Any request with a URL prefix matching one of the __heavy-prefix__ arguments will be considered heavy.
-
-- Any request with a query string will be considered heavy.
+The priorities are recalculated everytime a request is grabbed from the queue.
 
 
 ## Cron-like system
@@ -142,6 +142,37 @@ def runs_at_half_past_every_hour():
 If you are using multi-process mode, these will only be activated in the first process.
 
 
+## Request parking
+
+A request parking mechanism allows for long-polling, where a request may be held deliberately for a long time before being responded to, without tying up a worker for each request.
+
+A worker may respond immediately with the response headers:
+
+```
+X-WSGo-Park: channel1, channel2, channel3
+X-WSGo-Park-Timeout: 60 http-204
+```
+
+This will cause the worker to finish, but the client will not be responded to. When the park timeout expires, the request will be handled according to the timeout action:
+
+*retry*: The request will be retried.
+*disconnect*: The connection will be dropped without a response.
+*http-204*: The client will receive a HTTP 204 No Content response.
+*http-504*: The client will receive a HTTP 504 Gateway Timeout response.
+
+Parked requests can also be awakened via a function called from another thread:
+
+``wsgo.notify_parked(channels, action, arg)`
+
+where `channels` is a string containing a comma separated list of channels, `action` is a integer corresponding to RETRY(0)/DISCONNECT(1)/HTTP-204(2)/HTTP-504(3), and `arg` is a string argument that, in the case of a retry, will be passed along with the request as the header `X-WSGo-Park-Arg`.
+
+Any channel in the list of supplied channels that matches a channel of a waiting parked request will cause it to be awakened.
+
+A retried request will be called with the same HTTP method and request body, with the additional `X-WSGo-Park-Arg` header (which in the case of a timeout retry may be a blank string). A retried request cannot be parked (to avoid the potential for eternally parked requests).
+
+Each process handles its parked requests separately, so if you need to be able to awaken requests parked on one process from another process, you will need a separate asynchronous signalling mechanism between processes (such as PostgreSQL's LISTEN/NOTIFY) with a dedicated listening thread in each process.
+
+
 # Background
 
 This project is heavily inspired by uWSGI, which the author has successfully used in production for many years. However it has some drawbacks:
@@ -159,8 +190,6 @@ This project is heavily inspired by uWSGI, which the author has successfully use
 
 This project is currently being used in production, but still needs some tuning and has some missing features.
 
-- Is the threads-per-process count appropriate? It is deliberately quite high, but this may cause issues with the number of simultaneous database connections required. It does provide an easy way to queue low priority requests, by limiting them to a smaller pool of threads, but this may be better done by reordering the queue.
+- Is the threads-per-process count appropriate? It is deliberately quite high, but this may cause issues with the number of simultaneous database connections required. Also the GIL will prevent true multiprocessing, but then threading uses less memory than an equivalent number of processes.
 
-- It is currently too easy to (accidentially or deliberately) bog down the server with a flood of requests. It already attempts to confine consistently-slow endpoint requests to a smaller pool of threads, but it might also be useful to restrict the number of simultaneous requests by source IP, or apply rate limiting. The defaults need to be set such that this doesn't get in the way of normal use, however.
-
-- The code still needs tidying up, and some tests writing.
+- The code still needs tidying up, and more tests writing.

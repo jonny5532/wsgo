@@ -2,7 +2,6 @@ package wsgo
 
 import (
 	"context"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -76,7 +75,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		cw = NewNonCachingCacheWriter(w)
 	}
 
-	var requestReader io.Reader = req.Body
+	var requestReader RequestReader
 
 	if requestBufferLength>0 && (req.Method == "POST" || req.Method == "PUT" || req.Method == "PATCH") {
 		reqBufLen, err := strconv.Atoi(req.Header.Get("Content-length"))
@@ -85,6 +84,8 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		}
 		// Read and buffer an initial chunk of the request body
 		requestReader = NewBufferingReader(req.Body, reqBufLen)
+	} else {
+		requestReader = NewBufferingReader(req.Body, 0)
 	}
 
 	job := &RequestJob{
@@ -96,7 +97,9 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 
 	scheduler.HandleJob(job, time.Duration(requestTimeout*2) * time.Second)
 
-	ResolveAccel(job)
+	if ResolveAccel(job) {
+		return
+	}
 
 	cw.Flush()
 

@@ -2,6 +2,7 @@ package wsgo
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,16 +19,21 @@ func firstNonEmpty(a string, b string, c string) string {
 }
 
 func GetRemoteAddr(req *http.Request) string {
-	remoteAddr := req.RemoteAddr
-	remoteAddrColonIndex := strings.LastIndex(remoteAddr, ":")
-	if remoteAddrColonIndex > -1 {
-		remoteAddr = remoteAddr[:remoteAddrColonIndex]
+	remoteAddr, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return "-"
 	}
-	return firstNonEmpty(
-		strings.TrimSpace(strings.Split(req.Header.Get("X-Forwarded-For"), ",")[0]),
-		remoteAddr,
-		"-",
-	)
+
+	remoteAddrIp := net.ParseIP(remoteAddr)	
+	if remoteAddrIp != nil && (remoteAddrIp.IsLoopback() || remoteAddrIp.IsPrivate()) {
+		// only use X-F-F header if remoteAddr is local/private
+		f := strings.TrimSpace(strings.Split(req.Header.Get("X-Forwarded-For"), ",")[0])
+		if f != "" {
+			return f
+		}
+	}
+
+	return remoteAddr
 }
 
 func LogRequest(req *http.Request, statusCode int, finishTime time.Time, elapsed int, cpuTime int, workerNumber int, priority int) {

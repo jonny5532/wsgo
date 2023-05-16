@@ -1,31 +1,27 @@
 package wsgo
 
 import (
-	"io"
 	"net/http"
 	"time"
 
 )
 
 type RequestJob struct {
-	w          http.ResponseWriter
+	w          *CacheWriter
 	statusCode int
 	req        *http.Request
-	r          io.Reader
+	r          RequestReader
 	// job was cancelled before completion (eg, timeout, requester disconnected)
 	cancelled  bool
 	done       chan bool
 
 	// does it make sense for priority to be externally visible? it's really an internal concern of schedulers?
 	priority   int
-	//isSlow     bool
 
 	// X-SendFile / X-Accel-Redirect file
 	sendFile   string
 
-	// for asynchronous responses
-	//asyncId    string
-	//asyncDone  chan bool
+	parkedId    string
 }
 
 type Scheduler interface {

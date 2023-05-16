@@ -23,7 +23,9 @@ int _PyIter_Check(PyObject *o) {
 
 extern void go_wsgi_start_response(long request_id, const char* status, int status_len, const char** header_parts, int* header_part_lengths, int headers_size);
 extern PyObject *go_wsgi_read_request(long request_id, long to_read);
+extern PyObject *go_wsgi_read_request_line(long request_id);
 extern void go_add_cron(PyObject *func, long period, long min, long hour, long day, long mon, long wday);
+extern void go_notify_parked(const char* parked_id, int parked_id_len, int action, const char* param, int param_len);
 
 
 // _PyCFunctionFast signature
@@ -122,20 +124,17 @@ PyObject *wsgi_input_read(wsgo_WsgiInput* self, PyObject* args) {
 		return NULL;
 	}
 
-	//printf("wsgi_input_read %d %d\n", self->request_id, to_read);
 	return go_wsgi_read_request(self->request_id, to_read);
-	//return NULL;
 }
 
-PyObject *wsgi_input_readline(PyObject* self, PyObject* args) {
-	printf("wsgi_input_readline\n");
-	return NULL;
+PyObject *wsgi_input_readline(wsgo_WsgiInput* self, PyObject* args) {
+	return go_wsgi_read_request_line(self->request_id);
 }
 
 // TODO - implement more than just read
 static PyMethodDef wsgi_input_methods[] = {
 	{ "read",      (PyCFunction)wsgi_input_read,      METH_VARARGS, 0 },
-	// { "readline",  (PyCFunction)wsgi_input_readline,  METH_VARARGS, 0 },
+	{ "readline",  (PyCFunction)wsgi_input_readline,  METH_VARARGS, 0 },
 	// { "readlines", (PyCFunction)wsgi_input_readlines, METH_VARARGS, 0 },
 	// { "close",     (PyCFunction)wsgi_input_close,     METH_VARARGS, 0 },
 	// { "seek",     (PyCFunction)wsgi_input_seek,     METH_VARARGS, 0 },
@@ -207,8 +206,35 @@ static PyObject* wsgo_add_cron(PyObject *self, PyObject **args, Py_ssize_t nargs
 	return Py_None;
 }
 
+// _PyCFunctionFast signature
+static PyObject* wsgo_notify_parked(PyObject *self, PyObject **args, Py_ssize_t nargs)
+{
+	if(nargs==3) {
+		Py_ssize_t parked_id_len;
+		const char *parked_id = PyUnicode_AsUTF8AndSize(args[0], &parked_id_len);
+
+		int action = PyLong_AsLong(args[1]);
+
+		Py_ssize_t param_len;
+		const char *param;
+
+		if(PyUnicode_Check(args[2])) {
+			param = PyUnicode_AsUTF8AndSize(args[2], &param_len);
+		} else {
+			param_len = 0;
+			param = 0;
+		}
+
+		go_notify_parked(parked_id, parked_id_len, action, param, param_len);
+	}
+
+	Py_IncRef(Py_None);
+	return Py_None;
+}
+
 static PyMethodDef WsgoMethods[] = {
 	{"add_cron", (PyCFunction)wsgo_add_cron, METH_FASTCALL, "Registers a cron handler"},
+	{"notify_parked", (PyCFunction)wsgo_notify_parked, METH_FASTCALL, "Notifies a parked job"},
 	{NULL, NULL, 0, NULL}
 };
 

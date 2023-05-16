@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"math/rand"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -106,13 +107,16 @@ func (sched *FancyScheduler) CalculateJobPriority(job *RequestJob) int {
 	// TODO - also demote long-response-time requests? but don't want to make long-polling impossible?
 
 	remoteAddr := GetRemoteAddr(job.req)
+	remoteAddrIp := net.ParseIP(remoteAddr)
 
-	sched.activeRequestsBySourceMutex.Lock()
-	priority -= 1000*sched.activeRequestsBySource[remoteAddr]
-	sched.activeRequestsBySourceMutex.Unlock()
+	if remoteAddrIp != nil && !remoteAddrIp.IsLoopback() && !remoteAddrIp.IsPrivate() {
+		sched.activeRequestsBySourceMutex.Lock()
+		priority -= 1000*sched.activeRequestsBySource[remoteAddr]
+		sched.activeRequestsBySourceMutex.Unlock()
 
-	r := sched.GetAgedRequestCount(remoteAddr)
-	priority -= int(200*r.count)
+		r := sched.GetAgedRequestCount(remoteAddr)
+		priority -= int(200*r.count)
+	}
 
 	return priority
 }
