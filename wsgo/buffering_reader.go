@@ -6,11 +6,11 @@ import (
 )
 
 type BufferingReader struct {
-	r io.Reader
-	buf []byte
-	initial []byte
+	r        io.Reader
+	buf      []byte
+	initial  []byte
 	// whether `initial` holds the entire request or not
-	partial bool
+	partial  bool
 }
 
 func NewBufferingReader(r io.Reader, bufLen int) *BufferingReader {
@@ -19,10 +19,12 @@ func NewBufferingReader(r io.Reader, bufLen int) *BufferingReader {
 	}
 
 	// Read and buffer an initial chunk
-	buf := make([]byte, bufLen)
-	n, _ := io.ReadFull(r, buf)
-	b.buf = buf[:n]
-	b.initial = b.buf
+	if bufLen > 0 {
+		buf := make([]byte, bufLen)
+		n, _ := io.ReadFull(r, buf)
+		b.buf = buf[:n]
+		b.initial = b.buf
+	}
 	return b
 }
 
@@ -49,6 +51,43 @@ func (b *BufferingReader) Read(p []byte) (int, error) {
 		b.partial = true
 	}
 	return n, err
+}
+
+func (b *BufferingReader) Readline(p []byte) (n int, err error) {
+	total := 0
+	for {
+		// does buffer need refilling?
+		if len(b.buf)==0 {
+			if cap(b.buf)<8192 {
+				b.buf = make([]byte, 8192)
+			}
+			n, _ := io.ReadFull(b.r, b.buf)
+			b.buf = b.buf[:n]
+			if n==0 {
+				return total, io.EOF
+			}
+			b.partial = true
+		}
+
+		var i int
+		limit := min(len(p), len(b.buf))
+		for i = 0; i < limit; i += 1 {
+			p[i] = b.buf[i]
+			if b.buf[i]==byte(10) {
+				b.buf = b.buf[i+1:]
+				return total + i + 1, nil
+			}
+		}
+
+		b.buf = b.buf[i:]
+		p = p[i:]
+		total += i
+
+		if len(p)==0 {
+			// no output buffer left, return
+			return total, nil
+		}
+	}
 }
 
 func (b *BufferingReader) Rewind() error {

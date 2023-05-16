@@ -12,15 +12,20 @@ import (
 	"unsafe"
 )
 
-var requestReaders map[int64]io.Reader
+type RequestReader interface {
+	Read([]byte) (n int, err error);
+	Readline([]byte) (n int, err error);
+	Rewind() error;
+}
+
+var requestReaders map[int64]RequestReader
 var requestReadersMutex sync.Mutex
 
 func init() {
-	requestReaders = make(map[int64]io.Reader)
+	requestReaders = make(map[int64]RequestReader)
 }
 
-//export go_wsgi_read_request
-func go_wsgi_read_request(request_id C.long, to_read C.long) *C.PyObject {
+func doReadRequest(request_id C.long, to_read C.long, read_line bool) *C.PyObject {
 	// We should already be in a locked thread but we'll do this again to be safe
 	runtime.LockOSThread()
 
@@ -39,14 +44,19 @@ func go_wsgi_read_request(request_id C.long, to_read C.long) *C.PyObject {
 	rr := requestReaders[int64(request_id)]
 	requestReadersMutex.Unlock()
 
-	n, _ := io.ReadFull(rr, buf)
+	var n int
+	if read_line {
+		n, _ = rr.Readline(buf)
+	} else {
+		n, _ = io.ReadFull(rr, buf)
+	}
 
 	// safe version:
 	// c_str := C.CString(string(buf[:n]))
 	// defer C.free(unsafe.Pointer(c_str))
 
-	// hacky version without the extra copy (by exploiting the layout of slices):
-	c_str := *(**C.char)(unsafe.Pointer(&buf))
+	// unsafe version: (relies on buf staying in scope)
+	c_str := (*C.char)(unsafe.Pointer(&buf[0]))
 
 	//Regrab the GIL
 	C.PyEval_RestoreThread(gilState)
@@ -58,7 +68,17 @@ func go_wsgi_read_request(request_id C.long, to_read C.long) *C.PyObject {
 	return ret
 }
 
-func AddWsgiRequestReader(requestId int64, reader io.Reader) {
+//export go_wsgi_read_request
+func go_wsgi_read_request(request_id C.long, to_read C.long) *C.PyObject {
+	return doReadRequest(request_id, to_read, false)
+}
+
+//export go_wsgi_read_request_line
+func go_wsgi_read_request_line(request_id C.long) *C.PyObject {
+	return doReadRequest(request_id, 0, true)
+}
+
+func AddWsgiRequestReader(requestId int64, reader RequestReader) {
 	requestReadersMutex.Lock()
 	requestReaders[requestId] = reader
 	requestReadersMutex.Unlock()

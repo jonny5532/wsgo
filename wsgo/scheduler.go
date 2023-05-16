@@ -1,17 +1,16 @@
 package wsgo
 
 import (
-	"io"
 	"net/http"
 	"time"
 
 )
 
 type RequestJob struct {
-	w          http.ResponseWriter
+	w          *CacheWriter
 	statusCode int
 	req        *http.Request
-	r          io.Reader
+	r          RequestReader
 	// job was cancelled before completion (eg, timeout, requester disconnected)
 	cancelled  bool
 	done       chan bool

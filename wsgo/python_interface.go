@@ -23,6 +23,7 @@ int _PyIter_Check(PyObject *o) {
 
 extern void go_wsgi_start_response(long request_id, const char* status, int status_len, const char** header_parts, int* header_part_lengths, int headers_size);
 extern PyObject *go_wsgi_read_request(long request_id, long to_read);
+extern PyObject *go_wsgi_read_request_line(long request_id);
 extern void go_add_cron(PyObject *func, long period, long min, long hour, long day, long mon, long wday);
 extern void go_notify_parked(const char* parked_id, int parked_id_len, int action, const char* param, int param_len);
 
@@ -123,20 +124,17 @@ PyObject *wsgi_input_read(wsgo_WsgiInput* self, PyObject* args) {
 		return NULL;
 	}
 
-	//printf("wsgi_input_read %d %d\n", self->request_id, to_read);
 	return go_wsgi_read_request(self->request_id, to_read);
-	//return NULL;
 }
 
-PyObject *wsgi_input_readline(PyObject* self, PyObject* args) {
-	printf("wsgi_input_readline\n");
-	return NULL;
+PyObject *wsgi_input_readline(wsgo_WsgiInput* self, PyObject* args) {
+	return go_wsgi_read_request_line(self->request_id);
 }
 
 // TODO - implement more than just read
 static PyMethodDef wsgi_input_methods[] = {
 	{ "read",      (PyCFunction)wsgi_input_read,      METH_VARARGS, 0 },
-	// { "readline",  (PyCFunction)wsgi_input_readline,  METH_VARARGS, 0 },
+	{ "readline",  (PyCFunction)wsgi_input_readline,  METH_VARARGS, 0 },
 	// { "readlines", (PyCFunction)wsgi_input_readlines, METH_VARARGS, 0 },
 	// { "close",     (PyCFunction)wsgi_input_close,     METH_VARARGS, 0 },
 	// { "seek",     (PyCFunction)wsgi_input_seek,     METH_VARARGS, 0 },

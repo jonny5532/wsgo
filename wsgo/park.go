@@ -1,7 +1,6 @@
 package wsgo
 
 import (
-	"io"
 	"log"
 	"strconv"
 	"strings"
@@ -66,8 +65,6 @@ func ParkJob(job *RequestJob) {
 		}
 	}
 
-	log.Println("ok:", timeout, timeoutAction)
-
 	// remove old headers
 	for k, _ := range job.w.Header() {
 		job.w.Header().Del(k)
@@ -125,37 +122,33 @@ func ParkJob(job *RequestJob) {
 		return
 	} else {
 		if notification.action == HTTP_204 {
-			job.w.(*CacheWriter).writer.WriteHeader(204)
+			job.w.writer.WriteHeader(204)
 		} else { //if action == HTTP_504 {
-			job.w.(*CacheWriter).writer.WriteHeader(504)
-			job.w.(*CacheWriter).writer.Write([]byte("Gateway Timeout"))
+			job.w.writer.WriteHeader(504)
+			job.w.writer.Write([]byte("Gateway Timeout"))
 		}
 		return
 	}
 
-	var requestReader io.Reader
+	var requestReader RequestReader
 	if requestBufferLength>0 && (job.req.Method == "POST" || job.req.Method == "PUT" || job.req.Method == "PATCH") {
-		err := job.r.(*BufferingReader).Rewind()
+		err := job.r.Rewind()
 		if err != nil {
 			// couldn't rewind, maybe we didn't store the whole request?
-			job.w.(*CacheWriter).writer.WriteHeader(502)
-			job.w.(*CacheWriter).writer.Write([]byte("Bad Gateway"))
+			job.w.writer.WriteHeader(502)
+			job.w.writer.Write([]byte("Bad Gateway"))
 			return
 		}
 		requestReader = job.r
 	} else {
-		requestReader = strings.NewReader("")
+		requestReader = job.r
+		//strings.NewReader("")
 	}
-	
 
 	// pass the notification arg so the handler knows we were parked previously (and has the arg)
 	job.req.Header.Set("X-WSGo-Park-Arg", notification.arg)
 
-	cw := NewNonCachingCacheWriter(job.w.(*CacheWriter).writer)
-	// crudely remove all the headers that already got added to the response
-	// for k, _ := range cw.writer.Header() {
-	// 	cw.writer.Header().Del(k)
-	// }
+	cw := NewNonCachingCacheWriter(job.w.writer)
 
 	newJob := &RequestJob{
 		w:        cw,
