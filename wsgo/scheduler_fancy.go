@@ -35,6 +35,8 @@ type FancyScheduler struct {
 func (sched *FancyScheduler) HandleJob(job *RequestJob, timeout time.Duration) error {
 	notify := true
 
+	requestCount.Add(1)
+
 	sched.jobQueueMutex.Lock()
 	sched.jobQueue = append(sched.jobQueue, job)
 	if len(sched.jobQueue) > maxQueueLength {
@@ -44,6 +46,7 @@ func (sched *FancyScheduler) HandleJob(job *RequestJob, timeout time.Duration) e
 		job.w.WriteHeader(504)
 		job.w.Write([]byte("Gateway Timeout"))
 		job.done <- true
+		droppedCount.Add(1)
 		notify = false
 	}
 	sched.jobQueueMutex.Unlock()
@@ -62,6 +65,7 @@ func (sched *FancyScheduler) HandleJob(job *RequestJob, timeout time.Duration) e
 		return errors.New("Job context was done before being handled!")
 	case <-time.After(timeout):
 		job.cancelled = true
+		timeoutCount.Add(1)
 		return errors.New("Job timed out without being handled!")
 	}
 	

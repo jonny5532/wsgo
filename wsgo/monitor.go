@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 )
@@ -14,26 +16,43 @@ import (
 */
 import "C"
 
+var requestCount atomic.Uint64
+var timeoutCount atomic.Uint64
+var droppedCount atomic.Uint64
+var errorCount atomic.Uint64
+
+func PrintRequestStats() {
+	p := strconv.Itoa(process) + ":"
+	fmt.Println(p, "Request count:", requestCount.Load())
+	fmt.Println(p, "Request errors:", errorCount.Load())
+	fmt.Println(p, "Request timeouts:", timeoutCount.Load())
+	fmt.Println(p, "Request drops:", droppedCount.Load())
+}
+
 func PrintMemoryStats() {
 	var rtm runtime.MemStats
 
 	// Read full mem stats
 	runtime.ReadMemStats(&rtm)
 
-	fmt.Println("Goroutine count:", runtime.NumGoroutine())
-	fmt.Println("Go allocated memory (in bytes):", rtm.Alloc)
+	p := strconv.Itoa(process) + ":"
+	fmt.Println(p, "Goroutine count:", runtime.NumGoroutine())
+	fmt.Println(p, "Go allocated memory (in bytes):", rtm.Alloc)
 
 	runtime.LockOSThread()
 	gilState := C.PyGILState_Ensure()
 	cmd := C.CString(`
 import threading
-print("Python live Thread count:", threading.active_count())
+print("`+p+` Python live Thread count:", threading.active_count())
 
 import gc
 gc.collect()
 
-from pympler import muppy
-print("Python allocated memory (in bytes):", muppy.get_size(muppy.get_objects(include_frames=True)))
+try:
+	from pympler import muppy
+	print("`+p+` Python allocated memory (in bytes):", muppy.get_size(muppy.get_objects(include_frames=True)))
+except ImportError:
+	pass
 `)
 	defer C.free(unsafe.Pointer(cmd))
 	C.PyRun_SimpleStringFlags(cmd, nil)
@@ -48,6 +67,7 @@ func NewMonitor() {
 	for {
 		<-sigs
 
+		PrintRequestStats()
 		PrintMemoryStats()
 	}
 }

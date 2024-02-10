@@ -23,7 +23,6 @@ import "C"
 
 type PythonWorker struct {
 	number  int
-	started time.Time
 	stuck   bool
 }
 
@@ -59,7 +58,6 @@ func StartWorkers() {
 }
 
 func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, int64, int64) {
-	worker.started = time.Now()
 	cpu_start := GetThreadCpuTime()
 
 	// Grab the GIL
@@ -144,11 +142,7 @@ func (worker *PythonWorker) Run() {
 	cpuSet.Set(process % cpuCount)
 	unix.SchedSetaffinity(0, &cpuSet)
 
-	//log.Println("Worker", strconv.Itoa(process)+":"+strconv.Itoa(worker.number), "started!")
-
 	for {
-		worker.started = time.Time{} //?
-
 		job := scheduler.GrabJob()
 
 		finish, elapsed, cpu_elapsed := worker.RunPythonTask(func() {
@@ -218,6 +212,7 @@ func (worker *PythonWorker) HandleJob(job *RequestJob) {
 	BadGateway := func() {
 		job.w.WriteHeader(502)
 		job.w.Write([]byte("Bad Gateway"))
+		errorCount.Add(1)
 	}
 
 	if ret == nil {
