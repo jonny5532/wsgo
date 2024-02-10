@@ -63,7 +63,6 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		// We might be able to cache this
 		if alreadyResponded {
 			cw = NewCacheOnlyCacheWriter()
-			//isHeavy = true
 		} else {
 			cw = NewCacheWriter(w)
 		}
@@ -71,7 +70,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		// We already responded, and are not going to cache, so bail
 		return
 	} else {
-		// Don't cache 'unsafe' methods
+		// Response won't be cached
 		cw = NewNonCachingCacheWriter(w)
 	}
 
@@ -82,7 +81,8 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		if err != nil || reqBufLen > requestBufferLength {
 			reqBufLen = requestBufferLength
 		}
-		// Read and buffer an initial chunk of the request body
+		// Read and buffer an initial chunk of the request body (good to do
+		// this now before we tie up a Python worker, since it will block).
 		requestReader = NewBufferingReader(req.Body, reqBufLen)
 	} else {
 		requestReader = NewBufferingReader(req.Body, 0)

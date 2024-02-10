@@ -84,15 +84,13 @@ The actual http server has longer hardcoded timeouts (2 seconds to read the requ
  --max-age <maximum cache time in seconds>     (default 0, disabled)
 ```
 
-You can enable caching by passing the `--max-age <seconds>` argument with a positive number of seconds to cache responses for. All responses to `GET`, `HEAD` and `OPTIONS` requests will be cached, unless they have a `Cache-control` header to disable caching, are more than 1 megabyte in size, or set cookies.
+You can enable caching by passing the `--max-age <seconds>` argument with a positive number of seconds to cache responses for. Responses to `GET`, `HEAD` and `OPTIONS` requests which include a `Cache-Control: max-age=<seconds>` header will be cached, for the specified number of seconds or the command-line argument, whichever is lower. 
 
-You will almost certainly need to modify your application for this to behave as you expect, since dynamic content will be cached by default. You should set a `Cache-control: no-cache` response header on any page where a user might expect to see updated content change immediately.
-
-You can reduce the cache time from the maximum with a `Cache-Control: max-age=<seconds>` response header, with the desired cache time in seconds.
+Responses that set cookies or are more than 1 megabyte in size are not cached.
 
 The cache respects the `Vary` response header, which is used to indicate that a cache entry should only be used if the supplied list of request header fields are the same on cached and future requests.
 
-For example, setting `Vary: Cookie` on a response header for a page in a customer account area will ensure that another customer, with a varying session cookie, will not see a cached response belonging to the first customer.
+For example, setting `Vary: Cookie` on a response header for a page in a customer account area will ensure that another customer, with a different session cookie, will not see a cached response belonging to the first customer.
 
 The `Vary: Cookie` check will match the the entire `Cookie` request header, which may contain more than one cookie. You can supply an additional non-standard response header, `X-WSGo-Vary-Cookies`, to specify which individual cookies the page should vary on. This allows cookies such as tracking cookies, which don't affect the page content, to be ignored. For example:
 
@@ -121,6 +119,15 @@ The priority of a request is calculated as follows:
 The priorities are recalculated everytime a request is grabbed from the queue.
 
 
+## Signals
+
+You can send signals to running wsgo processes to cause them to report status information to stdout.
+
+`killall wsgo -s USR1` will print stack traces of all Python workers, which can be useful to diagnose hangs (such as every worker waiting for an unresponsive database with no timeout).
+
+`killall wsgo -s USR2` will print request and error count and memory statistics.
+
+
 ## Cron-like system
 
 The `wsgo` module provides two decorators:
@@ -137,6 +144,10 @@ For example:
 @wsgo.cron(30, -1, -1, -1, -1)
 def runs_at_half_past_every_hour():
     print("Hi there!")
+
+@wsgo.timer(30)
+def runs_every_thirty_seconds():
+    print("Hello again!")
 ```
 
 If you are using multi-process mode, these will only be activated in the first process.
@@ -191,5 +202,7 @@ This project is heavily inspired by uWSGI, which the author has successfully use
 This project is currently being used in production, but still needs some tuning and has some missing features.
 
 - Is the threads-per-process count appropriate? It is deliberately quite high, but this may cause issues with the number of simultaneous database connections required. Also the GIL will prevent true multiprocessing, but then threading uses less memory than an equivalent number of processes.
+
+- Using Python 3.12's subinterpreters to allow concurrent Python execution inside the same process.
 
 - The code still needs tidying up, and more tests writing.

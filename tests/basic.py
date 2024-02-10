@@ -119,4 +119,5 @@ class BasicTests(unittest.TestCase):
         ).text, t2)
 
 if __name__ == '__main__':
+    print("Testing on", sys.version)
     unittest.main(buffer=True)

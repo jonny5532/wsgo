@@ -22,6 +22,18 @@ def application(env, start_response):
 		])
 		return [b"notified!"]
 
+	if env['PATH_INFO']=='/data':
+		start_response('200 OK', [
+			('Content-Type','text/html'),
+		])
+		return [b"0123456789"*100]
+
+	if env['PATH_INFO']=='/favicon.ico':
+		start_response('404 Not Found', [
+			('Content-Type','text/html'),
+		])
+		return [b"Not found"]
+
 	time.sleep(1)
 
 	print('env is', env)
