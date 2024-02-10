@@ -168,16 +168,20 @@ func CachePage(cw *CacheWriter, req *http.Request) {
 		return
 	}
 
-	lifetimeSeconds := maxAge
+	lifetimeSeconds := 0
 	for _, cc := range strings.Split(responseHeaders.Get("Cache-Control"), ", ") {
 		if cc == "no-cache" || cc == "no-store" || cc == "private" || cc == "max-age=0" {
 			return
 		} else if len(cc) > 8 && cc[:8] == "max-age=" {
 			n, err := strconv.Atoi(cc[8:len(cc)])
-			if err != nil {
-				lifetimeSeconds = min(lifetimeSeconds, n)
+			if err == nil {
+				lifetimeSeconds = min(maxAge, n)
 			}
 		}
+	}
+
+	if lifetimeSeconds <= 0 {
+		return
 	}
 
 	// Store any request headers which are indicated by the Vary header, as the
@@ -201,7 +205,7 @@ func CachePage(cw *CacheWriter, req *http.Request) {
 	}
 
 	if responseHeaders.Get("Set-Cookie") != "" {
-		// don't cache set-cookie response
+		// don't cache set-cookie responses
 		return
 	}
 

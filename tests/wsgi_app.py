@@ -25,6 +25,7 @@ def application(environ, start_response):
     if environ['PATH_INFO']=='/time/':
         start_response('200 OK', [
             ('Content-Type','text/html'),
+            ('Cache-Control','max-age=60'),
             ('Vary','Cookie'),
         ])
         return [("%.3f"%(time.time())).encode('utf-8')]
