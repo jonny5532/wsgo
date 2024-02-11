@@ -403,8 +403,7 @@ def _timer_decorator(period_seconds):
 	return timer
 wsgo.timer = _timer_decorator
 
-wsgo.RETRY = 0
-wsgo.DISCONNECT = 1
+wsgo.RETRY = 1
 wsgo.HTTP_204 = 2
 wsgo.HTTP_504 = 3
 

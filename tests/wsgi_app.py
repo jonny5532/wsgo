@@ -1,10 +1,14 @@
 import hashlib
 import time
 import threading
+import wsgo
 
 thread_local = threading.local()
 
 def application(environ, start_response):
+    if environ['PATH_INFO'].startswith('/park/'):
+        return park_testing(environ, start_response)
+
     h = hashlib.md5()
     if environ['REQUEST_METHOD']=='POST':
         n = 0
@@ -50,3 +54,41 @@ def application(environ, start_response):
         return [environ['PATH_INFO'].encode('utf-8')]
 
     return [h.hexdigest().encode('utf-8')]
+
+
+def park_testing(environ, start_response):
+    if environ['PATH_INFO'] == '/park/park':
+        # Is this a retry?
+        if 'HTTP_X_WSGO_PARK_ARG' in environ:
+            start_response('200 OK', [])
+            # Return the arg
+            return [environ['HTTP_X_WSGO_PARK_ARG'].encode('ascii')]
+
+        start_response('200 OK', [
+            ('Content-Type','text/html'),
+            ('X-WSGo-Park', '12345, 12346'),
+            ('X-WSGo-Park-Timeout', '6 http-504'),
+        ])
+
+        return [b"ignored"]
+
+    if environ['PATH_INFO'] == '/park/notify_204':
+        wsgo.notify_parked("12345", wsgo.HTTP_204, "")
+        start_response('200 OK', [
+            ('Content-Type','text/html'),
+        ])
+        return [b"notified!"]
+
+    if environ['PATH_INFO'] == '/park/notify_retry':
+        wsgo.notify_parked("12345", wsgo.RETRY, "retry_arg")
+        start_response('200 OK', [
+            ('Content-Type','text/html'),
+        ])
+        return [b"notified!"]
+
+    if environ['PATH_INFO'] == '/park/notify_wrong':
+        wsgo.notify_parked("555", wsgo.HTTP_504, "")
+        start_response('200 OK', [
+            ('Content-Type','text/html'),
+        ])
+        return [b"notified!"]

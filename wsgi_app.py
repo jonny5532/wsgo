@@ -16,7 +16,7 @@ lock = threading.Lock()
 
 def application(env, start_response):
 	if env['PATH_INFO']=='/notify':
-		wsgo.notify_parked("12345", 0, "boo")
+		wsgo.notify_parked("12345", wsgo.RETRY, "boo")
 		start_response('200 OK', [
 			('Content-Type','text/html'),
 		])
@@ -33,6 +33,13 @@ def application(env, start_response):
 			('Content-Type','text/html'),
 		])
 		return [b"Not found"]
+
+	if env['PATH_INFO']=='/wait':
+		time.sleep(10)
+		start_response('200 OK', [
+			('Content-Type','text/html'),
+		])
+		return [b"hiya"]
 
 	time.sleep(1)
 

@@ -16,7 +16,7 @@ DOCKER_BUILDKIT=1 docker build \
  --progress plain \
  . || exit 1
 
-exec docker run -it --rm -u $(id -u):$(id -g) -v $PWD/dist:/output -v $PWD/tests:/tests $( \
+exec docker run -it --rm -u $(id -u):$(id -g) -v $PWD/dist:/output -v $PWD/tests:/code/tests $( \
  DOCKER_BUILDKIT=1 docker build \
   --build-arg PY_MAJ=${PY_MAJ} \
   --build-arg PY_MIN=${PY_MIN} \

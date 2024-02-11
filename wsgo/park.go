@@ -23,8 +23,8 @@ type ParkedJobNotification struct {
 }
 
 const (
-	RETRY      int = 0
-	DISCONNECT     = 1
+	DISCONNECT int = 0
+	RETRY          = 1
 	HTTP_204       = 2
 	HTTP_504       = 3
 )
