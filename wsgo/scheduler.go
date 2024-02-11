@@ -2,8 +2,8 @@ package wsgo
 
 import (
 	"net/http"
+	"sync/atomic"
 	"time"
-
 )
 
 type RequestJob struct {
@@ -11,17 +11,21 @@ type RequestJob struct {
 	statusCode int
 	req        *http.Request
 	r          RequestReader
-	// job was cancelled before completion (eg, timeout, requester disconnected)
-	cancelled  bool
+
+	grabbed    atomic.Bool
 	done       chan bool
 
-	// does it make sense for priority to be externally visible? it's really an internal concern of schedulers?
+	// stats used for logging
+	finish     time.Time
+	elapsed    int64
+	cpuElapsed int64
+	worker     int
 	priority   int
 
 	// X-SendFile / X-Accel-Redirect file
 	sendFile   string
 
-	parkedId    string
+	parkedId   string
 }
 
 type Scheduler interface {
@@ -32,7 +36,7 @@ type Scheduler interface {
 	GrabJob() *RequestJob
 
 	// called from worker thread, indicates that a job is finished and should be released back to the web handler
-	JobFinished(job *RequestJob, elapsed int64, cpu_elapsed int64)
+	JobFinished(job *RequestJob)
 }
 
 var scheduler Scheduler

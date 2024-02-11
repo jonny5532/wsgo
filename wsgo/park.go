@@ -142,7 +142,6 @@ func ParkJob(job *RequestJob) {
 		requestReader = job.r
 	} else {
 		requestReader = job.r
-		//strings.NewReader("")
 	}
 
 	// pass the notification arg so the handler knows we were parked previously (and has the arg)
@@ -156,7 +155,7 @@ func ParkJob(job *RequestJob) {
 		r:	      requestReader,
 		done:     make(chan bool, 1),
 	}
-	scheduler.HandleJob(newJob, time.Duration(requestTimeout*2) * time.Second)
+	scheduler.HandleJob(newJob, time.Duration(requestTimeout) * time.Second)
 
 	// we deliberately don't handle any accels from retries
 

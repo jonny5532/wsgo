@@ -95,7 +95,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		done:     make(chan bool, 1),
 	}
 
-	scheduler.HandleJob(job, time.Duration(requestTimeout*2) * time.Second)
+	scheduler.HandleJob(job, time.Duration(requestTimeout) * time.Second)
 
 	if ResolveAccel(job) {
 		return

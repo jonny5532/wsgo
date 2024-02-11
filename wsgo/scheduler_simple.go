@@ -25,7 +25,7 @@ func (sched *SimpleScheduler) GrabJob() *RequestJob {
 	return <- sched.jobQueue
 }
 
-func (sched *SimpleScheduler) JobFinished(job *RequestJob, elapsed int64, cpu_elapsed int64) {
+func (sched *SimpleScheduler) JobFinished(job *RequestJob) {
 	job.done <- true
 }
 

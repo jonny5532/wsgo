@@ -145,23 +145,13 @@ func (worker *PythonWorker) Run() {
 	for {
 		job := scheduler.GrabJob()
 
-		finish, elapsed, cpu_elapsed := worker.RunPythonTask(func() {
+		job.worker = worker.number
+
+		job.finish, job.elapsed, job.cpuElapsed = worker.RunPythonTask(func() {
 			worker.HandleJob(job)
 		}, requestTimeout)
 
-
-		scheduler.JobFinished(job, elapsed, cpu_elapsed)
-
-		// could move this off this thread?
-		LogRequest(
-		 	job.req,
-		 	job.statusCode,
-		 	finish,
-		 	int(elapsed),
-			int(cpu_elapsed),
-		 	worker.number,
-			job.priority,
-		)
+		scheduler.JobFinished(job)
 	}
 }
 

@@ -51,3 +51,15 @@ func LogRequest(req *http.Request, statusCode int, finishTime time.Time, elapsed
 		strconv.Itoa(priority),
 	)
 }
+
+func LogRequestJob(job *RequestJob) {
+	LogRequest(
+		job.req,
+		job.statusCode,
+		job.finish,
+		int(job.elapsed),
+		int(job.cpuElapsed),
+		job.worker,
+		job.priority,
+	)
+}

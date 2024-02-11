@@ -32,44 +32,77 @@ type FancyScheduler struct {
 	activeRequests  atomic.Int32
 }
 
-func (sched *FancyScheduler) HandleJob(job *RequestJob, timeout time.Duration) error {
-	notify := true
+func Send504(job *RequestJob) {
+	job.w.WriteHeader(504)
+	job.w.Write([]byte("Gateway Timeout"))
+	job.finish = time.Now()
+	job.statusCode = 504
+}
 
+func (sched *FancyScheduler) HandleJob(job *RequestJob, timeout time.Duration) error {
 	requestCount.Add(1)
+
+	var dropJob *RequestJob
+	var dropJobIndex int
 
 	sched.jobQueueMutex.Lock()
 	sched.jobQueue = append(sched.jobQueue, job)
 	if len(sched.jobQueue) > maxQueueLength {
-		// queue is now too long, we can either drop this request, or better, drop the lowest prio request?
-		job, jobIndex := sched.GetLowestPriorityJob()
-		sched.jobQueue = append(sched.jobQueue[:jobIndex], sched.jobQueue[jobIndex+1:]...)
-		job.w.WriteHeader(504)
-		job.w.Write([]byte("Gateway Timeout"))
-		job.done <- true
-		droppedCount.Add(1)
-		notify = false
+		// Queue is now too long, grab the lowest priority request so we can drop it
+		dropJob, dropJobIndex = sched.GetLowestPriorityJob()
+		sched.jobQueue = append(sched.jobQueue[:dropJobIndex], sched.jobQueue[dropJobIndex+1:]...)
 	}
 	sched.jobQueueMutex.Unlock()
 
-	if notify {
+	if dropJob != nil {
+		// Drop the job we grabbed
+		Send504(dropJob)
+		droppedCount.Add(1)
+		dropJob.done <- true
+	} else {
+		// We added a job to the list, so signal that to any waiting handlers
 		sched.jobsWaiting <- true
 	}
 
 	// this is ugly?
 	ctx := job.req.Context()
 
+	var err error
+	shouldLog := true
+
 	select {
 	case <-job.done:
+		// Job completed normally
 	case <-ctx.Done():
-		job.cancelled = true
-		return errors.New("Job context was done before being handled!")
+		// Request socket probably closed
+		if !job.grabbed.Swap(true) {
+			// Never got started, so don't bother logging
+			shouldLog = false
+		} else {
+			// Wait for job to finish so we can log properly
+			<-job.done
+			// Should we indicate on the log line that the response never got sent?
+		}
+		err = errors.New("Job context was done before being handled!")
 	case <-time.After(timeout):
-		job.cancelled = true
-		timeoutCount.Add(1)
-		return errors.New("Job timed out without being handled!")
+		// Timed out, so try to grab exclusively
+		if !job.grabbed.Swap(true) {
+			// Successfully grabbed, we can inflict a timeout
+			Send504(job)
+			timeoutCount.Add(1)
+			err = errors.New("Job timed out without being handled!")
+		} else {
+			// Couldn't grab, job is being serviced, so wait for it
+			<-job.done
+			// Should we indicate on the log line that the response never got sent?
+		}
+	}
+
+	if shouldLog {
+		LogRequestJob(job)
 	}
 	
-	return nil
+	return err
 }
 
 func (sched *FancyScheduler) GetAgedRequestCount(remoteAddr string) RequestCount {
@@ -180,7 +213,9 @@ func (sched *FancyScheduler) GrabJob() *RequestJob {
 		// Try and grab a waiting job
 		job := sched.grabQueuedJob()
 		if job != nil {
-			if job.cancelled {
+			// Try to grab exclusively
+			if job.grabbed.Swap(true) {
+				// was already grabbed by someone else, skip
 				continue
 			}
 
@@ -209,7 +244,7 @@ func (sched *FancyScheduler) GrabJob() *RequestJob {
 	}
 }
 
-func (sched *FancyScheduler) JobFinished(job *RequestJob, elapsed int64, cpu_elapsed int64) {
+func (sched *FancyScheduler) JobFinished(job *RequestJob) {
 	sched.activeRequests.Add(-1)
 
 	ra := GetRemoteAddr(job.req)
@@ -227,7 +262,7 @@ func (sched *FancyScheduler) JobFinished(job *RequestJob, elapsed int64, cpu_ela
 		r = &nr
 		sched.cpuTimeByUrl.Add(job.req.RequestURI, r)
 	}
-	r.Add(cpu_elapsed)
+	r.Add(job.cpuElapsed)
 
 	job.done <- true
 }
