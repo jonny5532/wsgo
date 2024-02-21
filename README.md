@@ -111,8 +111,8 @@ The priority of a request is calculated as follows:
 
 - All requests start with a priority of 1000
 - Anything with a query string: -500
-- Each concurrent request from the same IP: -1000
-- Each historic request from the same IP: -200 (decays by +200/second)
+- Each concurrent request from the same IPv4 or /64: -2000
+- Each historic request from the same IPv4 or /64: -1000 (decays by +1000/second)
 - User-Agent containing bot/crawler/spider/index: -8000
 - Each millisecond of average CPU time for same request URI: -10
 

@@ -119,6 +119,14 @@ func (sched *FancyScheduler) GetAgedRequestCount(remoteAddr string) RequestCount
 	return r
 }
 
+func GetRateLimitKey(ip net.IP) string {
+	if ip6 := ip.To16(); ip6 != nil {
+		// Only consider the /64 when rate limiting
+		return ip6.Mask(net.CIDRMask(64, 128)).String()
+	}
+
+	return ip.String()
+}
 
 func (sched *FancyScheduler) CalculateJobPriority(job *RequestJob) int {
 	var priority int = 1000
@@ -147,12 +155,14 @@ func (sched *FancyScheduler) CalculateJobPriority(job *RequestJob) int {
 	remoteAddrIp := net.ParseIP(remoteAddr)
 
 	if remoteAddrIp != nil && !remoteAddrIp.IsLoopback() && !remoteAddrIp.IsPrivate() {
+		key := GetRateLimitKey(remoteAddrIp)
+
 		sched.activeRequestsBySourceMutex.Lock()
-		priority -= 1000*sched.activeRequestsBySource[remoteAddr]
+		priority -= 2000*sched.activeRequestsBySource[key]
 		sched.activeRequestsBySourceMutex.Unlock()
 
-		r := sched.GetAgedRequestCount(remoteAddr)
-		priority -= int(200*r.count)
+		r := sched.GetAgedRequestCount(key)
+		priority -= int(1000*r.count)
 	}
 
 	return priority
