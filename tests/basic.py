@@ -81,3 +81,8 @@ class BasicTests(WsgoTestCase):
             'http://localhost:8000/time/',
             headers={'Cookie':'asdf=dsfg'}
         ).text, t2)
+
+    def test_atexit(self):
+        self.start('--module', 'wsgi_app', '--process', '1')
+        self.stop()
+        self.assertIn("atexit was called", sys.stdout.getvalue())

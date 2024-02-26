@@ -1,3 +1,4 @@
+import atexit
 import hashlib
 import time
 import threading
@@ -92,3 +93,7 @@ def park_testing(environ, start_response):
             ('Content-Type','text/html'),
         ])
         return [b"notified!"]
+
+def do_atexit():
+    print('atexit was called')
+atexit.register(do_atexit)

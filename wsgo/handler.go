@@ -122,6 +122,7 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 	}
 
 	InitPythonInterpreter(wsgiModule)
+
 	StartWorkers()
 
 	go CronRoutine()
@@ -164,8 +165,32 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 
 	select {
 		case <-shuttingDown:
-			log.Println("Process", process, "shut down gracefully.")
+			// pass
 		case <-time.After(time.Duration(requestTimeout) * time.Second):
+			// All requests should have completed by now, but something has hung.
 			log.Println("Process", process, "shutdown timed out, exiting.")
+			return
 	}
+
+	// We've shut down the server (all requests should be done), and no background
+	// jobs are running, so that just leaves the Python interpreter to shut down.
+
+	finalized := make(chan bool, 0)
+	go func() {
+		select {
+			case <-finalized:
+				// pass
+			case <-time.After(15 * time.Second):
+				// Py_Finalize probably won't return, so just exit
+				log.Println("Process", process, "finalize timed out, exiting.")
+				os.Exit(0)
+		}
+	}()
+	
+	// This needs to be called from the same thread that 
+	// called InitPythonInterpreter.
+	DeinitPythonInterpreter()
+	finalized <- true
+	
+	log.Println("Process", process, "shut down gracefully.")
 }

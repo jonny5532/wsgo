@@ -370,6 +370,10 @@ func ReadWsgiResponseToWriter(response *C.PyObject, w io.Writer) error {
 }
 
 func InitPythonInterpreter(module_name string) {
+	// We need to lock the calling thread, since we want to be able to deinit
+	// later from the same thread.
+	runtime.LockOSThread()
+
 	C.register_wsgo_module() // must happen before Py_Initialize
 
 	C.initialise_python()
@@ -437,6 +441,14 @@ wsgo.HTTP_504 = 3
 	C.PyType_Ready(&C.wsgi_input_type)
 
 	C.PyEval_SaveThread()
+}
+
+func DeinitPythonInterpreter() {
+	// Grab the gil
+	C.PyGILState_Ensure()
+
+	// Finalize, so that we call any atexit handlers
+	C.Py_Finalize()
 }
 
 func PyEval(code string) (*C.PyObject, func()) {

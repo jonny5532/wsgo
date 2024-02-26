@@ -42,3 +42,7 @@ class WsgoTestCase(unittest.TestCase):
         # Then shuffle the rest through with threads
         threading.Thread(target=passthrough, args=(self.process.stdout, sys.stdout)).start()
         threading.Thread(target=passthrough, args=(self.process.stderr, sys.stderr)).start()
+
+    def stop(self):
+        self.process.terminate()
+        self.process.wait()
