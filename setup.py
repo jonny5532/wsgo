@@ -6,7 +6,7 @@ from setuptools.dist import Distribution
 
 from wheel.bdist_wheel import bdist_wheel
 
-wsgo_version = "0.0.14"
+wsgo_version = "0.0.15"
 
 
 class CustomWheel(bdist_wheel):
@@ -17,9 +17,6 @@ class CustomWheel(bdist_wheel):
 class CustomDistribution(Distribution):
     def __init__(self, *attrs):
         Distribution.__init__(self, *attrs)
-#        self.cmdclass['install'] = CustomInstall
-#        self.cmdclass['install_lib'] = CustomInstallLib
-#        self.cmdclass['build_ext'] = CustomBuilder
         self.cmdclass['bdist_wheel'] = CustomWheel
 
     def is_pure(self):
