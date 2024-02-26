@@ -163,25 +163,25 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 
 	server.Serve(listener)
 
+	shutdownTimedOut := false
 	select {
 		case <-shuttingDown:
-			// pass
+			// Successfully shut down.
 		case <-time.After(time.Duration(requestTimeout) * time.Second):
 			// All requests should have completed by now, but something has hung.
-			log.Println("Process", process, "shutdown timed out, exiting.")
-			return
+			// We'll still try and finalize the Python interpreter though.
+			shutdownTimedOut = true
 	}
 
-	// We've shut down the server (all requests should be done), and no background
-	// jobs are running, so that just leaves the Python interpreter to shut down.
+	// Now try to shut down the Python interpreter.
 
 	finalized := make(chan bool, 0)
 	go func() {
 		select {
 			case <-finalized:
-				// pass
+				// Finalized succesfully.
 			case <-time.After(15 * time.Second):
-				// Py_Finalize probably won't return, so just exit
+				// Py_Finalize probably won't return, so just exit.
 				log.Println("Process", process, "finalize timed out, exiting.")
 				os.Exit(0)
 		}
@@ -192,5 +192,9 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 	DeinitPythonInterpreter()
 	finalized <- true
 	
-	log.Println("Process", process, "shut down gracefully.")
+	if shutdownTimedOut {
+		log.Println("Process", process, "shutdown timed out, exiting.")
+	} else {
+		log.Println("Process", process, "shut down gracefully.")
+	}
 }
