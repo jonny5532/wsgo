@@ -229,17 +229,17 @@ func (sched *FancyScheduler) GrabJob() *RequestJob {
 				continue
 			}
 
-			ra := GetRemoteAddr(job.req)
+			key := GetRateLimitKey(net.ParseIP(GetRemoteAddr(job.req)))
 
 			sched.activeRequests.Add(1)
 
 			sched.activeRequestsBySourceMutex.Lock()
-			sched.activeRequestsBySource[ra] += 1
+			sched.activeRequestsBySource[key] += 1
 			sched.activeRequestsBySourceMutex.Unlock()
 
-			r := sched.GetAgedRequestCount(ra)
+			r := sched.GetAgedRequestCount(key)
 			r.count += 1
-			sched.requestsBySource.Add(ra, r)
+			sched.requestsBySource.Add(key, r)
 
 			return job
 		}
@@ -257,12 +257,12 @@ func (sched *FancyScheduler) GrabJob() *RequestJob {
 func (sched *FancyScheduler) JobFinished(job *RequestJob) {
 	sched.activeRequests.Add(-1)
 
-	ra := GetRemoteAddr(job.req)
+	key := GetRateLimitKey(net.ParseIP(GetRemoteAddr(job.req)))
 	sched.activeRequestsBySourceMutex.Lock()
-	if sched.activeRequestsBySource[ra] <= 1 {
-		delete(sched.activeRequestsBySource, ra)
+	if sched.activeRequestsBySource[key] <= 1 {
+		delete(sched.activeRequestsBySource, key)
 	} else {
-		sched.activeRequestsBySource[ra] -= 1
+		sched.activeRequestsBySource[key] -= 1
 	}
 	sched.activeRequestsBySourceMutex.Unlock()
 
