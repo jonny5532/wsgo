@@ -25,6 +25,10 @@ def application(environ, start_response):
     if environ['PATH_INFO']=='/wait/':
         time.sleep(1)
 
+    if environ['PATH_INFO']=='/wait10/':
+        for i in range(100):
+            time.sleep(0.1)
+
     print("calling start_response")
 
     if environ['PATH_INFO']=='/time/':

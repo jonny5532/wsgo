@@ -1,6 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 import requests
 import sys
-import threading
 import time
 import unittest
 
@@ -48,13 +48,11 @@ class BasicTests(WsgoTestCase):
 
     def test_threading(self):
         self.start('--module', 'wsgi_app', '--process', '1')
-        def go():
+        def go(n):
             r = requests.get('http://localhost:8000/output/', timeout=5)
-            assert len(r.content)==50000000
-        for i in range(16):
-            threading.Thread(target=go).start()
-        time.sleep(2)
-        #print(sys.stdout.getvalue())
+            return len(r.content)==50000000
+        with ThreadPoolExecutor(16) as executor:
+            self.assertTrue(all(i for i in executor.map(go, range(16), timeout=5)))
     
     def test_caching(self):
         self.start('--module', 'wsgi_app', '--process', '1', '--max-age', '60')
@@ -84,5 +82,29 @@ class BasicTests(WsgoTestCase):
 
     def test_atexit(self):
         self.start('--module', 'wsgi_app', '--process', '1')
+        time.sleep(0.5)
         self.stop()
         self.assertIn("atexit was called", sys.stdout.getvalue())
+
+    def test_timeout(self):
+        self.start('--module', 'wsgi_app', '--process', '1', '--request-timeout', '2')
+
+        def do(t, u):
+            time.sleep(t)
+            r = requests.get('http://localhost:8000' + u)
+            return r.status_code
+
+        with ThreadPoolExecutor(15) as executor:
+            proms = []
+            for i in range(10):
+                # these should finish in time
+                proms.append(executor.submit(do, 1.5, '/wait/'))
+            for i in range(5):
+                # this should time out whilst the other ones are still running
+                proms.append(executor.submit(do, 0, '/wait10/'))
+
+            self.assertEqual(
+                [p.result(timeout=5) for p in proms], 
+                # 10 successes, 5 timeouts
+                [200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 502, 502, 502, 502, 502]
+            )
