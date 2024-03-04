@@ -21,6 +21,19 @@ var timeoutCount atomic.Uint64
 var droppedCount atomic.Uint64
 var errorCount atomic.Uint64
 
+func PrintPythonTraceback() {
+	runtime.LockOSThread()
+	gilState := C.PyGILState_Ensure()
+	cmd := C.CString(`
+import faulthandler
+faulthandler.dump_traceback(all_threads=True)
+`)
+	defer C.free(unsafe.Pointer(cmd))
+	C.PyRun_SimpleStringFlags(cmd, nil)
+	C.PyGILState_Release(gilState)
+	runtime.UnlockOSThread()
+}
+
 func PrintRequestStats() {
 	p := strconv.Itoa(process) + ":"
 	fmt.Println(p, "Request count:", requestCount.Load())
@@ -62,12 +75,15 @@ except ImportError:
 
 func NewMonitor() {
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGUSR2)
+	signal.Notify(sigs, syscall.SIGUSR1, syscall.SIGUSR2)
 
 	for {
-		<-sigs
-
-		PrintRequestStats()
-		PrintMemoryStats()
+		s := <-sigs
+		if s==syscall.SIGUSR1 {
+			PrintPythonTraceback()
+		} else {
+			PrintRequestStats()
+			PrintMemoryStats()
+		}
 	}
 }

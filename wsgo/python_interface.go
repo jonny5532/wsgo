@@ -386,11 +386,14 @@ func InitPythonInterpreter(module_name string) {
 	C.PyList_Append(sys_path, C.PyUnicode_FromString(s))
 	C.free(unsafe.Pointer(s))
 
+	// Note - faulthandler can segfault when printing tracebacks in response to
+	// signals since the GIL doesn't get acquired, and stack state can change
+	// underneath it. Thus we will handle the SIGUSR1-triggered stack traces
+	// from our own signal handler elsewhere, grabbing the GIL ourselves.
+
 	cmd := C.CString(`
 import faulthandler
-import signal
 faulthandler.enable() # dump all thread tracebacks on error signals
-faulthandler.register(signal.SIGUSR1) # dump tracebacks on SIGUSR1
 
 import wsgo
 def _cron_decorator(*args):
