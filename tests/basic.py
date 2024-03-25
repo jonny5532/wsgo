@@ -108,3 +108,19 @@ class BasicTests(WsgoTestCase):
                 # 10 successes, 5 timeouts
                 [200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 502, 502, 502, 502, 502]
             )
+
+    def test_response_close(self):
+        """
+        Check that wsgo is calling .close() on the response object after the
+        response has finished.
+        
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--request-timeout', '2')
+
+        # close won't have been called yet
+        self.assertEqual(requests.get('http://localhost:8000/close/').text, '0')
+        # close should have been called once already
+        self.assertEqual(requests.get('http://localhost:8000/close/').text, '1')
+        # close should have been called twice now
+        self.assertEqual(requests.get('http://localhost:8000/close/').text, '2')

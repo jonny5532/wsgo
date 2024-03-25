@@ -5,6 +5,7 @@ import threading
 import wsgo
 
 thread_local = threading.local()
+close_count = 0
 
 def application(environ, start_response):
     if environ['PATH_INFO'].startswith('/park/'):
@@ -57,6 +58,19 @@ def application(environ, start_response):
 
     if environ['PATH_INFO'].startswith('/echo/'):
         return [environ['PATH_INFO'].encode('utf-8')]
+
+    if environ['PATH_INFO'].startswith('/close/'):
+        class MyResponse:
+            def __init__(self, data):
+                self.data = data
+
+            def __iter__(self):
+                return iter(self.data)
+
+            def close(self):
+                global close_count
+                close_count += 1
+        return MyResponse([str(close_count).encode('utf-8')])
 
     return [h.hexdigest().encode('utf-8')]
 

@@ -366,6 +366,15 @@ func ReadWsgiResponseToWriter(response *C.PyObject, w io.Writer) error {
 		}
 	}
 
+	// We must call .close() on the response if present
+	closeString := C.CString("close")
+	defer C.free(unsafe.Pointer(closeString))
+	if C.PyObject_HasAttrString(response, closeString) == 1 {
+		close := C.PyObject_GetAttrString(response, closeString)
+		C.PyObject_CallObject(close, nil)
+		C.Py_DecRef(close)
+	}
+
 	return nil
 }
 
