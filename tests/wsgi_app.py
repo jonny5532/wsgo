@@ -72,6 +72,10 @@ def application(environ, start_response):
                 close_count += 1
         return MyResponse([str(close_count).encode('utf-8')])
 
+    if environ['PATH_INFO'].startswith('/thread-local/'):
+        setattr(thread_local, 'count', getattr(thread_local, 'count', 0) + 1)
+        return [str(thread_local.count).encode('utf-8')]
+
     return [h.hexdigest().encode('utf-8')]
 
 

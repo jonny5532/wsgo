@@ -124,3 +124,21 @@ class BasicTests(WsgoTestCase):
         self.assertEqual(requests.get('http://localhost:8000/close/').text, '1')
         # close should have been called twice now
         self.assertEqual(requests.get('http://localhost:8000/close/').text, '2')
+
+    def test_thread_local(self):
+        """
+        Check that thread local storage is working correctly between requests.
+
+        (Using PyGILState_Release instead of PyEval_ReleaseThread was causing
+        thread local storage to be reset between requests).
+
+        """
+
+        # Start with only one thread
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1', '--request-timeout', '2')
+
+        # Check that thread local is actually retaining state between requests.
+
+        self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '1')
+        self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '2')
+        self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '3')

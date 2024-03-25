@@ -22,8 +22,12 @@ import (
 import "C"
 
 type PythonWorker struct {
-	number  int
-	stuck   bool
+	number      int
+	stuck       bool
+	// This gets set once, the first time we run a task on a worker
+	gilState    C.PyGILState_STATE
+	// This is used to remember the threadstate between successive tasks
+	threadState *C.PyThreadState
 }
 
 var workers []*PythonWorker
@@ -60,8 +64,16 @@ func StartWorkers() {
 func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, int64, int64) {
 	cpu_start := GetThreadCpuTime()
 
-	// Grab the GIL
-	gilState := C.PyGILState_Ensure()
+	if worker.threadState != nil {
+		// We have a previously saved thread state, so we can just use that
+		C.PyEval_RestoreThread(worker.threadState)
+	} else {
+		// This is the first time so use PyGILState_Ensure to make sure a new
+		// threadstate gets created. We'll (maybe) call the corresponding
+		// PyGILState_Release in each thread just before shutdown. (TODO)
+		worker.gilState = C.PyGILState_Ensure()
+	}
+
 
 	pydone := make(chan bool, 1)
 	thread_id := C.PyThread_get_thread_ident()
@@ -110,6 +122,7 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 			}
 
 			C.PyGILState_Release(gs)
+			runtime.UnlockOSThread()
 		}()
 	}
 
@@ -120,7 +133,9 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 	worker.stuck = false
 	pydone <- true
 
-	C.PyGILState_Release(gilState)
+	// We have to use PyEval_SaveThread rather than PyGILState_Release here because
+	// we want to keep the thread state around for the next time we run a task.
+	worker.threadState = C.PyEval_SaveThread()
 
 	finish := time.Now()
 	elapsed := finish.Sub(start).Milliseconds()
