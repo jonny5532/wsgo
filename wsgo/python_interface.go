@@ -232,9 +232,62 @@ static PyObject* wsgo_notify_parked(PyObject *self, PyObject **args, Py_ssize_t 
 	return Py_None;
 }
 
+struct websocket_message {
+	PyObject* channel;
+	PyObject* message;
+	int messageType;
+};
+
+struct websocket_message go_read_websockets(void);
+void go_send_websockets(struct websocket_message msg);
+
+// _PyCFunctionFast signature
+static PyObject* wsgo_read_websockets(PyObject *self, PyObject **args, Py_ssize_t nargs)
+{
+	//go_notify_parked(parked_id, parked_id_len, action, param, param_len);
+	struct websocket_message msg;
+	msg = go_read_websockets();
+
+	PyObject *ret = PyTuple_New(3);
+	PyTuple_SetItem(ret, 0, msg.channel);
+	PyTuple_SetItem(ret, 1, msg.message);
+	PyTuple_SetItem(ret, 2, PyLong_FromLong(msg.messageType));
+
+	return ret;
+}
+
+// _PyCFunctionFast signature
+static PyObject* wsgo_send_websockets(PyObject *self, PyObject **args, Py_ssize_t nargs)
+{
+	//go_notify_parked(parked_id, parked_id_len, action, param, param_len);
+	struct websocket_message msg;
+	
+	//msg. = PyUnicode_AsUTF8AndSize(args[0], &parked_id_len);
+	if(nargs==3 && PyUnicode_Check(args[0]) && PyBytes_Check(args[1]) && PyLong_Check(args[2])) {
+		msg.channel = args[0];
+		msg.message = args[1];
+		msg.messageType = PyLong_AsLong(args[2]);
+
+		go_send_websockets(msg);
+	}
+
+	// msg = go_read_websockets();
+
+	// PyObject *ret = PyTuple_New(3);
+	// PyTuple_SetItem(ret, 0, msg.channel);
+	// PyTuple_SetItem(ret, 1, msg.message);
+	// PyTuple_SetItem(ret, 2, PyLong_FromLong(msg.messageType));
+
+	Py_IncRef(Py_None);
+	return Py_None;
+}
+
+
 static PyMethodDef WsgoMethods[] = {
 	{"add_cron", (PyCFunction)wsgo_add_cron, METH_FASTCALL, "Registers a cron handler"},
 	{"notify_parked", (PyCFunction)wsgo_notify_parked, METH_FASTCALL, "Notifies a parked job"},
+	{"read_websockets", (PyCFunction)wsgo_read_websockets, METH_FASTCALL, "Wait for a websocket message"},
+	{"send_websockets", (PyCFunction)wsgo_send_websockets, METH_FASTCALL, "Send to websockets"},
 	{NULL, NULL, 0, NULL}
 };
 

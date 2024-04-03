@@ -24,6 +24,10 @@ func CanAccelResponse(job *RequestJob) bool {
 			return true
 		}
 	}
+
+	if v := job.w.Header().Get("X-WSGo-Websocket"); v!="" {
+		return true
+	}
 	return false
 }
 
@@ -35,6 +39,10 @@ func ResolveAccel(job *RequestJob) bool {
 	}
 	if job.parkedId != "" {
 		ParkJob(job)
+		return true
+	}
+	if v := job.w.Header().Get("X-WSGo-Websocket"); v!="" {
+		StartWebsocket(job)
 		return true
 	}
 	return false

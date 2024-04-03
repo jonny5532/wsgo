@@ -12,6 +12,12 @@ lock = threading.Lock()
 # 	print("acquiring lock")
 # 	lock.acquire()
 # 	print("got lock")
+def websocket_reader():
+	while True:
+		chan, msg, mtype = wsgo.read_websockets()
+		print("got message", msg)
+		wsgo.send_websockets(chan, b'r' + msg, mtype)
+threading.Thread(target=websocket_reader).start()
 
 
 def application(env, start_response):
@@ -33,6 +39,13 @@ def application(env, start_response):
 			('Content-Type','text/html'),
 		])
 		return [b"Not found"]
+
+	if env['PATH_INFO']=='/ws':
+		start_response('404 Not Found', [
+			('X-WSGo-Websocket','12345'),
+		])
+		return [b""]
+
 
 	if env['PATH_INFO']=='/wait':
 		time.sleep(10)
