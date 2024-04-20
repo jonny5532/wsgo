@@ -6,7 +6,11 @@ from setuptools.dist import Distribution
 
 from wheel.bdist_wheel import bdist_wheel
 
-wsgo_version = "0.0.17"
+wsgo_version = "0.0.18"
+
+from pathlib import Path
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
 
 
 class CustomWheel(bdist_wheel):
@@ -34,7 +38,8 @@ setup(
         ">=3.6"
     ),
     description="Simple and fast WSGI server in Go",
-    long_description="",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     distclass=CustomDistribution,
     data_files=[ ('bin', ['bin/wsgo']) ],
     zip_safe=False,
