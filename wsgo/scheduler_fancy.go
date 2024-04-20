@@ -120,12 +120,13 @@ func (sched *FancyScheduler) GetAgedRequestCount(remoteAddr string) RequestCount
 }
 
 func GetRateLimitKey(ip net.IP) string {
-	if ip6 := ip.To16(); ip6 != nil {
-		// Only consider the /64 when rate limiting
-		return ip6.Mask(net.CIDRMask(64, 128)).String()
+	if ip4 := ip.To4(); ip4 != nil {
+		// Is an IPv4 address, rate limit exact address
+		return ip4.String()
 	}
 
-	return ip.String()
+	// Is an IPv6 address, rate limit the whole /64
+	return ip.Mask(net.CIDRMask(64, 128)).String()
 }
 
 func (sched *FancyScheduler) CalculateJobPriority(job *RequestJob) int {
