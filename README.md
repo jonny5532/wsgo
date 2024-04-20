@@ -4,17 +4,35 @@ A simple and fast Python WSGI application server written in Go, with sensible de
 
 ## Installation
 
-If you have Docker installed, you can run `./build.sh` to produce Go executables and Python wheels for all currently supported versions of Python, in the `dist/` folder.
+Binary packages are available via PyPI for Linux x86_64, install with:
 
-Then either run `pip install <dist/file.whl>` to install `wsgo` in your bin folder, or manually retrieve the appropriate `dist/wsgo-*` executable and include it with your app.
+`pip install wsgo`
+
+## Quickstart
+
+1. Create a `wsgi_app.py` file containing:
+
+```
+def application(env, start_response):
+    start_response('200 OK', [
+			  ('Content-Type','text/plain'),
+		])
+    return [b'Hello world!']
+```
+
+2. Start wsgo with:
+
+`wsgo --module wsgi_app --http-socket 127.0.0.1:8000`
+
+3. Go to `http://127.0.0.1:8000` in your web browser.
 
 
 ## Usage
 
 ```
-./wsgo 
+wsgo 
   --workers 8
-  --processes 4
+  --processes 2
   --module wsgi_app 
   --static-map /=webroot 
   --http-socket 0.0.0.0:8000
@@ -31,6 +49,13 @@ Then either run `pip install <dist/file.whl>` to install `wsgo` in your bin fold
 - Request prioritisation (by URL prefix, request properties, and previous response times)
 - Cron-like system for running background tasks
 - Request parking mechanism to support long-polling
+
+
+## Building from source
+
+If you have Docker installed, you can run `./build.sh` to produce Go executables and Python wheels for all currently supported versions of Python, in the `dist/` folder.
+
+Then either run `pip install <dist/file.whl>` to install `wsgo` in your bin folder, or manually retrieve the appropriate `dist/wsgo-*` executable and include it with your app.
 
 
 ## Caveats
@@ -78,6 +103,32 @@ Occasionally a thread may get 'stuck', if it is blocking in such a way that the 
 The actual http server has longer hardcoded timeouts (2 seconds to read the request header, 600 seconds to read the PUT/PATCH/POST body, 3600 seconds to write the response body, and 60 seconds max idle for a keep-alive). This is due to a Go limitation, where these can't be altered per-request, and so need to be large enough to accommodate the slowest uploads and downloads. However Go's coroutine mechanism means that a large number of lingering requests is not an issue, as long as the Python threads themselves are not overloaded.
 
 
+## Static file serving
+
+```
+ --static-map <path prefix>=<local path>
+
+eg:
+ --static-map /=webroot
+      # eg: requests to /favicon.ico will map to ./webroot/favicon.ico
+ --static-map /media=storage_dir/media_files
+      # eg: requests to /media/images/file1.jpg will map to ./storage_dir/media_files/images/file1.jpg
+```
+
+Static file serving is enabled by specifying one or more static mappings. If a request matches a static mapping path prefix, then the specified local path will be checked for a matching file (after stripping the mapping path prefix from the request), and if found it will be sent as the response.
+
+Static file serving happens before WSGI request handling, so if a matching static file is found, it will be returned as the response and processing will finish without calling the WSGI handler. If no matching file was found (even if a mapping prefix matched), the request will be passed on to the WSGI handler.
+
+Static files (after relative paths are resolved and symlinks are followed) must reside within the local path specified, which prevents escapes such as requests to `/media/../../../../etc/passwd`. You therefore cannot serve files which are symlinked to outside of the local path.
+
+You can place gzipped versions of static files adjacent to the originals, with the suffix `.gz`, for example:
+
+```./static/styles.css
+./static/styles.css.gz```
+
+Any request to `/static/styles.css` with a `Accept-Encoding:` header including `gzip` will be served the adjacent gzipped version instead (with `Content-Encoding: gzip` set), which will generally be smaller and served more quickly.
+
+
 ## Response caching
 
 ```
@@ -107,6 +158,8 @@ Incoming requests are assigned a priority, and higher priority tasks will be ser
 
 Requests with a priority below a hardcoded threshold (currently -7000) will only run if no other workers are busy. Requests may time out without being handled, if the queue never emptied and their priority was insufficient for them to run within their request timeout.
 
+A consequence of this is that there is a limit of five concurrent requests from the same IP (v4 /32 or v6 /64) per worker process.
+
 The priority of a request is calculated as follows:
 
 - All requests start with a priority of 1000
@@ -114,9 +167,17 @@ The priority of a request is calculated as follows:
 - Each concurrent request from the same IPv4 or /64: -2000
 - Each historic request from the same IPv4 or /64: -1000 (decays by +1000/second)
 - User-Agent containing bot/crawler/spider/index: -8000
-- Each millisecond of average CPU time for same request URI: -10
 
 The priorities are recalculated everytime a request is grabbed from the queue.
+
+
+## Buffering
+
+The first 1mb of POST/PUT/PATCH request bodies will be buffered before the WSGI handler is started. 
+
+Responses are not buffered.
+
+It is therefore possible for users on slow connections to tie up handlers for a significant time during large uploads or downloads - if this is a concern then consider using a buffering load balancer upstream of wsgo.
 
 
 ## Signals
@@ -141,6 +202,8 @@ These should be used on top-level functions declared in the WSGI application Pyt
 For example:
 
 ```
+import wsgo
+
 @wsgo.cron(30, -1, -1, -1, -1)
 def runs_at_half_past_every_hour():
     print("Hi there!")
@@ -150,7 +213,7 @@ def runs_every_thirty_seconds():
     print("Hello again!")
 ```
 
-If you are using multi-process mode, these will only be activated in the first process.
+If you are using more than one process, these will only be activated in the first one.
 
 
 ## Request parking

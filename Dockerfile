@@ -38,6 +38,6 @@ RUN CGO_LDFLAGS=-no-pie go build -o bin/wsgo
 
 
 
-ADD setup.py /code/
+ADD setup.py README.md /code/
 
 RUN LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/python${PY_MAJ}.${PY_MIN} setup.py bdist_wheel
