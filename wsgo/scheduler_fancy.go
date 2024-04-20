@@ -27,7 +27,6 @@ type FancyScheduler struct {
 	activeRequestsBySourceMutex sync.Mutex
 
 	requestsBySource *lru.TwoQueueCache[string, RequestCount]
-	cpuTimeByUrl *lru.TwoQueueCache[string, *RollingAverage]
 
 	activeRequests  atomic.Int32
 }
@@ -145,13 +144,6 @@ func (sched *FancyScheduler) CalculateJobPriority(job *RequestJob) int {
 		priority -= 500
 	}
 
-	cpuAvg, _ := sched.cpuTimeByUrl.Get(job.req.RequestURI)
-	if cpuAvg != nil {
-		priority -= int(cpuAvg.GetFilteredMax()*10)
-	}
-
-	// TODO - also demote long-response-time requests? but don't want to make long-polling impossible?
-
 	remoteAddr := GetRemoteAddr(job.req)
 	remoteAddrIp := net.ParseIP(remoteAddr)
 
@@ -230,14 +222,17 @@ func (sched *FancyScheduler) GrabJob() *RequestJob {
 				continue
 			}
 
-			key := GetRateLimitKey(net.ParseIP(GetRemoteAddr(job.req)))
-
+			// Increment the global active-request-count
 			sched.activeRequests.Add(1)
 
+			key := GetRateLimitKey(net.ParseIP(GetRemoteAddr(job.req)))
+
+			// Increment the active request count for the source
 			sched.activeRequestsBySourceMutex.Lock()
 			sched.activeRequestsBySource[key] += 1
 			sched.activeRequestsBySourceMutex.Unlock()
 
+			// Increment the historic request count for the source
 			r := sched.GetAgedRequestCount(key)
 			r.count += 1
 			sched.requestsBySource.Add(key, r)
@@ -250,14 +245,16 @@ func (sched *FancyScheduler) GrabJob() *RequestJob {
 		case <-sched.jobsWaiting:
 			// woke up for a waiting job
 		case <-time.After(time.Duration(rand.Intn(400) + 800) * time.Millisecond):
-			// woke up after timeout
+			// woke up after timeout (to avoid potential deadlocks)
 		}
 	}
 }
 
 func (sched *FancyScheduler) JobFinished(job *RequestJob) {
+	// Decrement the global active-request-count
 	sched.activeRequests.Add(-1)
 
+	// Remove the request from the currently active requests
 	key := GetRateLimitKey(net.ParseIP(GetRemoteAddr(job.req)))
 	sched.activeRequestsBySourceMutex.Lock()
 	if sched.activeRequestsBySource[key] <= 1 {
@@ -267,14 +264,7 @@ func (sched *FancyScheduler) JobFinished(job *RequestJob) {
 	}
 	sched.activeRequestsBySourceMutex.Unlock()
 
-	r, _ := sched.cpuTimeByUrl.Get(job.req.RequestURI)
-	if r == nil {
-		nr := NewRollingAverage()
-		r = &nr
-		sched.cpuTimeByUrl.Add(job.req.RequestURI, r)
-	}
-	r.Add(job.cpuElapsed)
-
+	// Signal that the job is done
 	job.done <- true
 }
 
@@ -283,15 +273,10 @@ func NewFancyScheduler() *FancyScheduler {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	cpuTimeByUrl, err := lru.New2Q[string, *RollingAverage](16384)
-	if err != nil {
-		log.Fatalln(err)
-	}
 
 	return &FancyScheduler{
 		jobsWaiting: make(chan bool, maxQueueLength),
 		activeRequestsBySource: make(map[string]int),
 		requestsBySource: requestsBySource,
-		cpuTimeByUrl: cpuTimeByUrl,
 	}
 }
