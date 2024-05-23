@@ -12,7 +12,7 @@ Binary packages are available via PyPI for Linux x86_64, install with:
 
 1. Create a `wsgi_app.py` file containing:
 
-```
+```python
 def application(env, start_response):
     start_response('200 OK', [
 			  ('Content-Type','text/plain'),
@@ -29,7 +29,7 @@ def application(env, start_response):
 
 ## Usage
 
-```
+```bash
 wsgo 
   --workers 8
   --processes 2
@@ -69,7 +69,6 @@ Then either run `pip install <dist/file.whl>` to install `wsgo` in your bin fold
 
 - The `wsgi.input` file-like object only implements the `read(n)` and `readline()` methods (this is enough for Django).
 - It can't yet be built via the regular `python setup.py compile` mechanism.
-
 
 
 # Documentation
@@ -123,8 +122,10 @@ Static files (after relative paths are resolved and symlinks are followed) must 
 
 You can place gzipped versions of static files adjacent to the originals, with the suffix `.gz`, for example:
 
-```./static/styles.css
-./static/styles.css.gz```
+```
+./webroot/static/styles.css
+./webroot/static/styles.css.gz
+```
 
 Any request to `/static/styles.css` with a `Accept-Encoding:` header including `gzip` will be served the adjacent gzipped version instead (with `Content-Encoding: gzip` set), which will generally be smaller and served more quickly.
 
@@ -201,7 +202,7 @@ These should be used on top-level functions declared in the WSGI application Pyt
 
 For example:
 
-```
+```python
 import wsgo
 
 @wsgo.cron(30, -1, -1, -1, -1)
@@ -253,7 +254,7 @@ This project is heavily inspired by uWSGI, which the author has successfully use
 
 - It is difficult to configure correctly - the defaults are unsuitable and achieving reliablity and high performance requires a lot of trial-and-error.
 
-- It is has a large amount of functionality implemented in C, so has the potential for buffer overflow vulnerabilities (it has had one CVE due to this so far).
+- It has a lot of protocol handling implemented in C, so has the potential for buffer overflow vulnerabilities (it has had one CVE due to this so far).
 
 - Using a reverse proxy/load balancer infront of it is recommended, as it has limited defense against request floods or slow loris attacks. It would be nice to not require this.
 
@@ -267,5 +268,7 @@ This project is currently being used in production, but still needs some tuning 
 - Is the threads-per-process count appropriate? It is deliberately quite high, but this may cause issues with the number of simultaneous database connections required. Also the GIL will prevent true multiprocessing, but then threading uses less memory than an equivalent number of processes.
 
 - Using Python 3.12's subinterpreters to allow concurrent Python execution inside the same process.
+
+- Need to decide whether to add more features such as Websockets or ASGI.
 
 - The code still needs tidying up, and more tests writing.
