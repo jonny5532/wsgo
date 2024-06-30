@@ -15,8 +15,8 @@ Binary packages are available via PyPI for Linux x86_64, install with:
 ```python
 def application(env, start_response):
     start_response('200 OK', [
-			  ('Content-Type','text/plain'),
-		])
+        ('Content-Type','text/plain'),
+    ])
     return [b'Hello world!']
 ```
 
