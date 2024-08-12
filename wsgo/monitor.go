@@ -36,6 +36,16 @@ faulthandler.dump_traceback(all_threads=True)
 
 func PrintRequestStats() {
 	p := strconv.Itoa(process) + ":"
+	
+	fmt.Println(p, "Active requests:", scheduler.activeRequests.Load())
+	fmt.Println(p, "Active requests by IP:")
+	
+	scheduler.activeRequestsBySourceMutex.Lock()
+	for k, v := range scheduler.activeRequestsBySource {
+		fmt.Println(p, " ", k + ":", v)
+	}
+	scheduler.activeRequestsBySourceMutex.Unlock()
+
 	fmt.Println(p, "Request count:", requestCount.Load())
 	fmt.Println(p, "Request errors:", errorCount.Load())
 	fmt.Println(p, "Request timeouts:", timeoutCount.Load())
