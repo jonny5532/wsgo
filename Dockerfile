@@ -8,7 +8,7 @@ ARG PY_PCH=11
 ARG PY_PKGCONFIG=python-3.10-embed
 
 RUN cd /tmp \
- && wget -O python.tar.gz https://www.python.org/ftp/python/${PY_MAJ}.${PY_MIN}.${PY_PCH}/Python-${PY_MAJ}.${PY_MIN}.${PY_PCH}.tgz \
+ && wget -O python.tar.gz https://www.python.org/ftp/python/${PY_MAJ}.${PY_MIN}.$(echo $PY_PCH | sed 's/\([0-9]*\).*/\1/g')/Python-${PY_MAJ}.${PY_MIN}.${PY_PCH}.tgz \
  && tar xzvf python.tar.gz
 
 RUN cd /tmp/Python-${PY_MAJ}* \
