@@ -1,13 +1,12 @@
 package wsgo
 
 import (
-	"fmt"
 	"log"
 	"runtime"
 	"strconv"
 	"sync/atomic"
-	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -23,7 +22,7 @@ import "C"
 
 type PythonWorker struct {
 	number      int
-	stuck       bool
+	stuck       atomic.Bool
 	// This gets set once, the first time we run a task on a worker
 	gilState    C.PyGILState_STATE
 	// This is used to remember the threadstate between successive tasks
@@ -35,13 +34,33 @@ var workers []*PythonWorker
 var lastRequestId int64
 
 func AllWorkersAreStuck() bool {
-	ret := true
 	for _, w := range workers {
-		if !w.stuck {
-			ret = false
+		if !w.stuck.Load() {
+			return false
 		}
 	}
-	return ret
+	return true
+}
+
+func GetRequestTimeoutException() (*C.PyObject) {
+	// Returns a new reference.
+
+	mod_name := C.CString("wsgo")
+	defer C.free(unsafe.Pointer(mod_name))
+	mod := C.PyImport_AddModule(mod_name) // borrowed reference
+	if mod == nil {
+		log.Fatalln("Failed to import wsgo module!")
+	}
+
+	exc_name := C.CString("RequestTimeoutException")
+	defer C.free(unsafe.Pointer(exc_name))
+
+	exc := C.PyObject_GetAttrString(mod, exc_name)
+	if exc == nil {
+		log.Fatalln("Failed to get RequestTimeoutException from wsgo module!")
+	}
+
+	return exc
 }
 
 func StartWorkers() {
@@ -79,9 +98,7 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 	thread_id := C.PyThread_get_thread_ident()
 
 	if timeout > 0 {
-		exc := C.PyExc_InterruptedError
-
-		//add a request timeout to kill the worker
+		// Add a request timeout to interrupt the worker
 		go func() {
 			select {
 			case <-pydone:
@@ -99,26 +116,25 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 			// 		default:
 			// 	}
 
-			// 	exc = C.PyExc_BrokenPipeError
-
 			case <-time.After(time.Duration(timeout) * time.Second):
-				fmt.Println("Timed out!")
+				log.Println("Task timed out!")
 
-				// flag worker as stuck, so we can detect whether our
+				// Flag the worker as stuck, so we can detect whether our
 				// attempt at interrupting it hasn't worked
-				worker.stuck = true
+				worker.stuck.Store(true)
 
-				// trigger a fancy traceback
-				syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
-				// wait for the traceback
-				time.Sleep(100 * time.Millisecond)
+				// Print a fancy traceback so we can see where it is stuck
+				PrintPythonTraceback()
 			}
 
 			runtime.LockOSThread()
 			gs := C.PyGILState_Ensure()
 
-			if C.PyThreadState_SetAsyncExc(thread_id, exc) == 0 {
-				log.Println("Failed to issue InterruptedError to stuck worker!")
+			exc := GetRequestTimeoutException()
+			defer C.Py_DecRef(exc)
+	
+			if C.PyThreadState_SetAsyncExc(thread_id, exc) != 1 {
+				log.Println("Failed to issue RequestTimeoutException to stuck worker!")
 			}
 
 			C.PyGILState_Release(gs)
@@ -130,7 +146,13 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 
 	task()
 
-	worker.stuck = false
+	if worker.stuck.Load() {
+		// Worker was stuck, so we need to clean up the side-effects of
+		// unsticking it.
+		worker.CleanupStuckWorker()
+	}
+
+	worker.stuck.Store(false)
 	pydone <- true
 
 	// We have to use PyEval_SaveThread rather than PyGILState_Release here because
@@ -146,7 +168,7 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 
 func (worker *PythonWorker) Run() {
 	// It is important that this goroutine always uses the same OS thread, else
-	// the python GIL will get very upset.
+	// the Python GIL will get very upset.
 	runtime.LockOSThread()
 
 	// Pin all the threads to the same CPU, which should reduce the 'convoy problem' caused by the GIL
@@ -267,4 +289,41 @@ func (worker *PythonWorker) HandleBackgroundJob(job *BackgroundJob) {
 	} else {
 		C.Py_DecRef(ret)
 	}
+}
+
+func (worker *PythonWorker) CleanupStuckWorker() {
+	// When an async exception has been raised on a thread, there is the risk of
+	// some locks not having been properly released, such as those in the
+	// logging module.
+
+	// We'll try to release such locks here, to avoid deadlocks on future
+	// requests.
+
+	// Must be called with the runtime thread locked and GIL held.
+
+	cmd := C.CString(`
+import logging
+
+# Release the global logging lock, if held
+try:
+	# RLocks are re-entrant so might be held multiple times
+	for i in range(50):
+		logging._lock.release()
+		print("Released leaked logging._lock!")
+except:
+	pass
+
+# Release the individual logging handler locks, if held
+for wr in reversed(logging._handlerList[:]):
+	try:
+		h = wr()
+		if h.lock:
+			for i in range(50):
+				h.release()
+				print('Released leaked %s lock!'%h)
+	except:
+		pass
+`)
+	defer C.free(unsafe.Pointer(cmd))
+	C.PyRun_SimpleStringFlags(cmd, nil)
 }

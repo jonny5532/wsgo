@@ -109,6 +109,36 @@ class BasicTests(WsgoTestCase):
                 [200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 502, 502, 502, 502, 502]
             )
 
+    def test_logging_deadlock(self):
+        """
+        Make requests that will timeout during a logging.error call, and check
+        whether they all finish without deadlocking.
+
+        In Python <3.13, a request timeout that occurs during a logging.error
+        call can cause a deadlock, because the logger's RLock won't be released
+        when the RequestTimeoutException fires.
+
+        wsgo mitigates this by releasing certain locks after unsticking a
+        worker.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--request-timeout', '1')
+
+        def do():
+            r = requests.get('http://localhost:8000/slowlog/', timeout=10)
+            return r.status_code
+
+        with ThreadPoolExecutor(5) as executor:
+            proms = []
+            for i in range(5):
+                proms.append(executor.submit(do))
+
+            self.assertEqual(
+                sorted(p.result() for p in proms),
+                # one request succeeds, the rest time out
+                [200, 502, 502, 502, 502]
+            )
+
     def test_response_close(self):
         """
         Check that wsgo is calling .close() on the response object after the

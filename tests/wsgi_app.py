@@ -1,11 +1,14 @@
 import atexit
 import hashlib
+import logging
 import time
 import threading
 import wsgo
 
 thread_local = threading.local()
 close_count = 0
+
+logger = logging.getLogger('test_logger')
 
 def application(environ, start_response):
     if environ['PATH_INFO'].startswith('/park/'):
@@ -29,6 +32,16 @@ def application(environ, start_response):
     if environ['PATH_INFO']=='/wait10/':
         for i in range(100):
             time.sleep(0.1)
+
+    if environ['PATH_INFO']=='/slowlog/':
+        class SlowString:
+            def __repr__(self):
+                time.sleep(2)
+                return "hello"
+
+        logger.error(
+            SlowString(),
+        )
 
     print("calling start_response")
 

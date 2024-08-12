@@ -423,6 +423,10 @@ wsgo.RETRY = 1
 wsgo.HTTP_204 = 2
 wsgo.HTTP_504 = 3
 
+class RequestTimeoutException(Exception):
+	pass
+wsgo.RequestTimeoutException = RequestTimeoutException
+wsgo.RequestTimeoutException.__module__ = "wsgo"
 `)
 	defer C.free(unsafe.Pointer(cmd))
 	C.PyRun_SimpleStringFlags(cmd, nil)
