@@ -46,7 +46,7 @@ wsgo
 - Multithreaded, with a multi-process mode
 - Built-in header-controlled response cache
 - Static file serving
-- Request prioritisation (by URL prefix, request properties, and previous response times)
+- Request prioritisation (by URL prefix, request properties, and connection counts)
 - Cron-like system for running background tasks
 - Request parking mechanism to support long-polling
 
@@ -84,9 +84,7 @@ By default several worker threads will be started, so that multiple responses ca
 
 Due to the Python Global Interpreter Lock (GIL), only one thread can run at a time, so a single process cannot use more than one core. If you start wsgo with the `--processes <n>` option, then `n` processes will be started, each with a full set of threads. The listening socket has `SO_REUSEPORT` set so that multiple processes can bind to the same address and will share the incoming request stream.
 
-The most appropriate number of threads will depend on your application. An app that makes lots of disk or network accesses will likely be IO bound and benefit from multiple threads, as useful work can be done whilst some threads are blocked waiting for IO to complete. However an app that is primarily CPU bound would be better with fewer threads, as more threads will incur unnecessary context switches and cache misses for little benefit.
-
-Threads carry some overhead - at least 8mb RAM per thread for the stack, as well as any thread-local resources such as open database connections. Beware of hitting MySQL's 150 or PostgreSQL's 100 default maximum connections.
+The most appropriate number of threads or processes will depend on your application[^1].
 
 
 ## Timeouts
@@ -95,9 +93,9 @@ Threads carry some overhead - at least 8mb RAM per thread for the stack, as well
  --request-timeout <timeout in seconds>       (default 60)
 ```
 
-There is a single configurable request timeout. If a worker is processing a request for longer than this, then a Python exception will be raised in the thread to interrupt it.
+There is a single configurable request timeout. If a worker is processing a request for longer than this, then a `wsgo.RequestTimeoutException` will be raised asynchronously in the thread to interrupt it.
 
-Occasionally a thread may get 'stuck', if it is blocking in such a way that the exception fails to interrupt it (for example, blocking IO requests being made within extensions without a timeout). If all of the workers get into this 'stuck' state, the process will exit and be restarted.
+Interrupting a running worker can cause problems in some code,[^2] resulting in the worker getting 'stuck'. If all of the workers get into a 'stuck' state simultaneously, the process will exit and be restarted. Note that if four or more requests from the same IP are 'stuck', the server may still be responsive to others, but that IP won't be able to make any further requests due to the priority-based IP limiting.
 
 The actual http server has longer hardcoded timeouts (2 seconds to read the request header, 600 seconds to read the PUT/PATCH/POST body, 3600 seconds to write the response body, and 60 seconds max idle for a keep-alive). This is due to a Go limitation, where these can't be altered per-request, and so need to be large enough to accommodate the slowest uploads and downloads. However Go's coroutine mechanism means that a large number of lingering requests is not an issue, as long as the Python threads themselves are not overloaded.
 
@@ -237,7 +235,7 @@ This will cause the worker to finish, but the client will not be responded to. W
 
 Parked requests can also be awakened via a function called from another thread:
 
-``wsgo.notify_parked(channels, action, arg)`
+`wsgo.notify_parked(channels, action, arg)`
 
 where `channels` is a string containing a comma separated list of channels, `action` is one of `wsgo.RETRY`/`wsgo.HTTP_204`/`wsgo.HTTP_504`, and `arg` is a string argument that, in the case of a retry, will be passed along with the request as the header `X-WSGo-Park-Arg`.
 
@@ -256,9 +254,23 @@ This project is heavily inspired by uWSGI, which the author has successfully use
 
 - It has a lot of protocol handling implemented in C, so has the potential for buffer overflow vulnerabilities (it has had one CVE due to this so far).
 
-- Using a reverse proxy/load balancer infront of it is recommended, as it has limited defense against request floods or slow loris attacks. It would be nice to not require this.
-
 - It lacks features like a page cache, which is understandable for larger deployments (where separate Varnish instances might be used) but would be nice to have built in for simpler deployments of smaller sites.
+
+
+# Notes
+
+[^1]:  An app that makes lots of database queries or API calls will likely benefit from multiple threads, as useful work can be done whilst some threads are blocked waiting for responses. However an app that is primarily CPU bound would be better with fewer threads, as more threads will incur unnecessary context switches and cache misses for little benefit.
+
+    A significant advantage of using multiple threads within a single process, as opposed to multiple processes, is that you can easily share data between workers (as they are all running in the same interpreter), which allows the use of fast local in-memory caches such as Django's LocMemCache.
+
+    Threads do carry some overhead - at least 8mb RAM per thread for the stack, as well as any thread-local resources such as open database connections. Also beware of hitting MySQL's 150 or PostgreSQL's 100 default maximum connections.
+
+    Multiple processes are completely isolated from each other, with their own Python interpreter, request queue and page cache.
+
+
+[^2]: Raising exceptions asynchronously in code that does not expect it cause deadlocks, resulting in threads getting permanently 'stuck'. This includes Python's logging framework pre-3.13, which linearizes all logging calls with a per-logger lock, and will leave the lock unreleased if an asynchronous exception occurs during the acquire. Whilst this shouldn't happen often, since the lock should only be held briefly during logging IO, it can occur reliably if the logging triggers slow database queries (such as Django error reports when outputting QuerySets).
+
+    wsgo mitigates this for the logging module, by attempting to release these locks after the request has finished, if an asynchronous exception was raised. Other libraries with this issue may require middleware to catch the `wsgo.RequestTimeoutException` and release the locks, or to always release the locks after every request just in case.
 
 
 # Roadmap
@@ -269,6 +281,6 @@ This project is currently being used in production, but still needs some tuning 
 
 - Using Python 3.12's subinterpreters to allow concurrent Python execution inside the same process.
 
-- Need to decide whether to add more features such as Websockets or ASGI.
+- Deciding whether to add more features such as Websockets or ASGI.
 
 - The code still needs tidying up, and more tests writing.
