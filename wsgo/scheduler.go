@@ -159,23 +159,26 @@ func GetRateLimitKey(ip net.IP) string {
 func (sched *Scheduler) CalculateJobPriority(job *RequestJob) int {
 	var priority int = 1000
 
-	ua := strings.ToLower(job.req.Header.Get("User-agent"))
-	for _, uas := range []string{"facebook", "bot", "crawler", "spider", "index", "http:", "https:"} {
-		if strings.Contains(ua, uas) {
-			priority -= 8000
-			break
-		}
-	}
-
-	if job.req.URL.RawQuery != "" {
-		// demote anything with a query string
-		priority -= 500
-	}
-
 	remoteAddr := GetRemoteAddr(job.req)
 	remoteAddrIp := net.ParseIP(remoteAddr)
 
+	// Check that request is being made from a non-local address
 	if remoteAddrIp != nil && !remoteAddrIp.IsLoopback() && !remoteAddrIp.IsPrivate() {
+
+		// We only demote crawlers if we're sure they're non-local (otherwise
+		// recursive requests with a crawler-like user-agent will hang)
+
+		ua := strings.ToLower(job.req.Header.Get("User-agent"))
+		for _, uas := range []string{"facebook", "bot", "crawler", "spider", "index", "http:", "https:"} {
+			if strings.Contains(ua, uas) {
+				priority -= 8000
+				break
+			}
+		}
+
+		// We also rate limit based a key derived from the remote address,
+		// considering both current and historic requests
+
 		key := GetRateLimitKey(remoteAddrIp)
 
 		sched.activeRequestsBySourceMutex.Lock()
@@ -184,6 +187,11 @@ func (sched *Scheduler) CalculateJobPriority(job *RequestJob) int {
 
 		r := sched.GetAgedRequestCount(key)
 		priority -= int(1000*r.count)
+	}
+
+	if job.req.URL.RawQuery != "" {
+		// Demote anything with a query string
+		priority -= 500
 	}
 
 	return priority
