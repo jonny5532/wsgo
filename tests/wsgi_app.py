@@ -13,6 +13,8 @@ logger = logging.getLogger('test_logger')
 def application(environ, start_response):
     if environ['PATH_INFO'].startswith('/park/'):
         return park_testing(environ, start_response)
+    if environ['PATH_INFO'].startswith('/block/'):
+        return block_testing(environ, start_response)
 
     h = hashlib.md5()
     if environ['REQUEST_METHOD']=='POST':
@@ -128,6 +130,14 @@ def park_testing(environ, start_response):
             ('Content-Type','text/html'),
         ])
         return [b"notified!"]
+
+def block_testing(environ, start_response):
+    start_response('200 OK', [
+        ('Content-Type','text/html'),
+        ('X-WSGo-Block', '2'),
+    ])
+
+    return [b"ignored"]
 
 def do_atexit():
     print('atexit was called')

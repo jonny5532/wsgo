@@ -34,6 +34,10 @@ func init() {
 }
 
 func Serve(w http.ResponseWriter, req *http.Request) {
+	if TryBlocking(w, req) {
+		return
+	}
+
 	if TryStatic(w, req) {
 		return
 	}

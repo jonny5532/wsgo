@@ -20,6 +20,8 @@ var requestCount atomic.Uint64
 var timeoutCount atomic.Uint64
 var droppedCount atomic.Uint64
 var errorCount atomic.Uint64
+var blockCount atomic.Uint64
+var blockedCount atomic.Uint64
 
 func PrintPythonTraceback() {
 	runtime.LockOSThread()
@@ -50,6 +52,8 @@ func PrintRequestStats() {
 	fmt.Println(p, "Request errors:", errorCount.Load())
 	fmt.Println(p, "Request timeouts:", timeoutCount.Load())
 	fmt.Println(p, "Request drops:", droppedCount.Load())
+	fmt.Println(p, "Blocks established:", blockCount.Load())
+	fmt.Println(p, "Blocked requests:", blockedCount.Load())
 }
 
 func PrintMemoryStats() {

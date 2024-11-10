@@ -266,6 +266,8 @@ func (worker *PythonWorker) HandleJob(job *RequestJob) {
 		}
 	}
 
+	UpdateBlocking(job)
+
 	if CanAccelResponse(job) {
 		// Is X-Sendfile or similar - the response will be done later, based
 		// on the headers alone.

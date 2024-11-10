@@ -49,6 +49,7 @@ wsgo
 - Request prioritisation (by URL prefix, request properties, and connection counts)
 - Cron-like system for running background tasks
 - Request parking mechanism to support long-polling
+- Blocking mechanism for DoS mitigation
 
 
 ## Building from source
@@ -213,6 +214,21 @@ def runs_every_thirty_seconds():
 ```
 
 If you are using more than one process, these will only be activated in the first one.
+
+
+## Blocking
+
+You can block a source IP address from being handled for a limited time period by sending the response header:
+
+```
+X-WSGo-Block: <time in seconds>
+```
+
+Any subsequent requests from the same source IP, to the same process, within the time period, will be responded to with an empty 429 response. The responses will be delayed for 25s (or the remaining block time, whichever is lower), to attempt to slow down DoS attacks or crawlers, although a maximum of 100 simultaneous requests will be delayed so as to not exhaust open file handles.
+
+Blocking is per-process, so if you are running multiple processes and want a block to apply across all of them, you will need a way to record blocks (eg, via a database) and reissue them if the visitor comes back via a different process, until the visitor is blocked in every process.
+
+Blocked requests are not logged individually (to avoid DoS attacks overflowing the logs), but the total number of blocked requests will be reported when the block expires.
 
 
 ## Request parking
