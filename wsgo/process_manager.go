@@ -27,7 +27,7 @@ func RunProcess(wg *sync.WaitGroup, process int) {
 			[]string{
 				// Stop glibc's per-thread arenas eating all the RAM, and
 				// encourage mmap use for allocations.
-				"GLIBC_TUNABLES=glibc.malloc.arena_max=2 glibc.malloc.mmap_threshold=250000",
+				"GLIBC_TUNABLES=glibc.malloc.arena_max=2:glibc.malloc.mmap_threshold=250000",
 			},
 			// Inherit parent process environment
 			os.Environ()...,
