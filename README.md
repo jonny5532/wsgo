@@ -157,7 +157,7 @@ Incoming requests are assigned a priority, and higher priority tasks will be ser
 
 Requests with a priority below a hardcoded threshold (currently -7000) will only run if no other workers are busy. Requests may time out without being handled, if the queue never emptied and their priority was insufficient for them to run within their request timeout.
 
-A consequence of this is that there is a limit of five concurrent requests from the same IP (v4 /32 or v6 /64) per worker process.
+A consequence of this is that there is a limit of five concurrent requests from the same IP (v4 /32 or v6 /64) per process.
 
 The priority of a request is calculated as follows:
 
@@ -228,10 +228,10 @@ X-WSGo-Park-Timeout: 60 http-204
 
 This will cause the worker to finish, but the client will not be responded to. When the park timeout expires, the request will be handled according to the timeout action:
 
-*retry*: The request will be retried.
-*disconnect*: The connection will be dropped without a response.
-*http-204*: The client will receive a HTTP 204 No Content response.
-*http-504*: The client will receive a HTTP 504 Gateway Timeout response.
+`retry`: The request will be retried.\
+`disconnect`: The connection will be dropped without a response.\
+`http-204`: The client will receive a HTTP 204 No Content response.\
+`http-504`: The client will receive a HTTP 504 Gateway Timeout response.
 
 Parked requests can also be awakened via a function called from another thread:
 
@@ -265,10 +265,10 @@ This project is heavily inspired by uWSGI, which the author has successfully use
 
     Threads do carry some overhead - at least 8mb RAM per thread for the stack, as well as any thread-local resources such as open database connections. Also beware of hitting MySQL's 150 or PostgreSQL's 100 default maximum connections.
 
-    Multiple processes are completely isolated from each other, with their own Python interpreter, request queue and page cache.
+    Multiple processes are completely isolated from each other, each with their own Python interpreter, request queue, block list and page cache. This is deliberate, to reduce the complexity of the system, and the chance of a deadlock spreading to all processes, but does reduce the effectiveness of using multiple processes rather than threads.
 
 
-[^2]: Raising exceptions asynchronously in code that does not expect it cause deadlocks, resulting in threads getting permanently 'stuck'. This includes Python's logging framework pre-3.13, which linearizes all logging calls with a per-logger lock, and will leave the lock unreleased if an asynchronous exception occurs during the acquire. Whilst this shouldn't happen often, since the lock should only be held briefly during logging IO, it can occur reliably if the logging triggers slow database queries (such as Django error reports when outputting QuerySets).
+[^2]: Raising exceptions asynchronously in code that does not expect it can cause deadlocks, resulting in threads getting permanently 'stuck'. This includes Python's logging framework pre-3.13, which serializes all logging calls with a per-logger lock, and will leave the lock unreleased if an asynchronous exception occurs during the acquire. Whilst this shouldn't happen often, since the lock should only be held briefly during logging IO, it can occur reliably if the logging triggers slow database queries (such as Django error reports when outputting QuerySets).
 
     wsgo mitigates this for the logging module, by attempting to release these locks after the request has finished, if an asynchronous exception was raised. Other libraries with this issue may require middleware to catch the `wsgo.RequestTimeoutException` and release the locks, or to always release the locks after every request just in case.
 

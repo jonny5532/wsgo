@@ -47,7 +47,7 @@ func init() {
 }
 
 func ParkJob(job *RequestJob) {
-	log.Println(" - waiting for retry", job.parkedId)
+	log.Println("- waiting for retry", job.parkedId)
 
 	// TODO - limit max number of pending retries
 
@@ -114,7 +114,7 @@ func ParkJob(job *RequestJob) {
 	}
 	parkedJobMutex.Unlock()
 	
-	log.Println(" - retry", job.parkedId, "notified: action =", notification.action)
+	log.Println("- retry", job.parkedId, "notified: action =", notification.action)
 
 	if notification.action == RETRY {
 		// pass

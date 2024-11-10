@@ -121,7 +121,6 @@ func (sched *Scheduler) HandleJob(job *RequestJob, timeout time.Duration) error 
 		} else {
 			// Couldn't grab, job is being serviced, so wait for it
 			<-job.done
-			// Should we indicate on the log line that the response never got sent?
 		}
 	}
 
