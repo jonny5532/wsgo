@@ -57,7 +57,7 @@ func ParkJob(job *RequestJob) {
 	timeout, timeoutAction := 7200, "http-204"
 
 	timeoutBits := strings.Split(job.w.Header().Get("X-WSGo-Park-Timeout"), " ")
-	if len(timeoutBits)==2 && (timeoutBits[1]=="retry" || timeoutBits[1]=="http-204" || timeoutBits[1]=="http-504") {
+	if len(timeoutBits)==2 && (timeoutBits[1]=="retry" || timeoutBits[1]=="disconnect" || timeoutBits[1]=="http-204" || timeoutBits[1]=="http-504") {
 		t, err := strconv.Atoi(timeoutBits[0])
 		if err == nil && t > 0 {
 			timeout = t
@@ -87,10 +87,12 @@ func ParkJob(job *RequestJob) {
 
 	select {
 	case notification = <-park.notify:
+		// got notification
 	case <-ctx.Done():
 		// other end disconnected
 		notification.action = DISCONNECT
 	case <-time.After(time.Duration(timeout) * time.Second):
+		// timeout
 		if timeoutAction == "http-204" {
 			notification.action = HTTP_204
 		} else if timeoutAction == "http-504" {
@@ -120,13 +122,12 @@ func ParkJob(job *RequestJob) {
 		// pass
 	} else if notification.action == DISCONNECT {
 		return
-	} else {
-		if notification.action == HTTP_204 {
-			job.w.writer.WriteHeader(204)
-		} else { //if action == HTTP_504 {
-			job.w.writer.WriteHeader(504)
-			job.w.writer.Write([]byte("Gateway Timeout"))
-		}
+	} else if notification.action == HTTP_204 {
+		job.w.writer.WriteHeader(204)
+		return
+	} else { //if action == HTTP_504 {
+		job.w.writer.WriteHeader(504)
+		job.w.writer.Write([]byte("Gateway Timeout"))
 		return
 	}
 

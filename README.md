@@ -253,7 +253,7 @@ Parked requests can also be awakened via a function called from another thread:
 
 `wsgo.notify_parked(channels, action, arg)`
 
-where `channels` is a string containing a comma separated list of channels, `action` is one of `wsgo.RETRY`/`wsgo.HTTP_204`/`wsgo.HTTP_504`, and `arg` is a string argument that, in the case of a retry, will be passed along with the request as the header `X-WSGo-Park-Arg`.
+where `channels` is a string containing a comma separated list of channels, `action` is one of `wsgo.RETRY`/`wsgo.DISCONNECT`/`wsgo.HTTP_204`/`wsgo.HTTP_504`, and `arg` is a string argument that, in the case of a retry, will be passed along with the request as the header `X-WSGo-Park-Arg`.
 
 Any channel in the list of supplied channels that matches a channel of a waiting parked request will cause it to be awakened.
 
