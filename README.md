@@ -4,7 +4,7 @@ A simple and fast Python WSGI application server written in Go, with sensible de
 
 ## Installation
 
-Binary packages are available via PyPI for Linux x86_64, install with:
+Binary packages are available via PyPI for Linux x86_64/arm64, install with:
 
 `pip install wsgo`
 
@@ -149,7 +149,8 @@ The `Vary: Cookie` check will match the the entire `Cookie` request header, whic
 
 A useful strategy is to add middleware to your application to add appropriate cache headers to every response if they are not already set. This might include:
 
-- always setting `Cache-control: no-cache` on any request by a logged-in user
+- setting `Cache-control: max-age=60` on content that rarely changes.
+- setting `Cache-control: no-cache` on any request by a logged-in user.
 
 
 ## Request prioritisation

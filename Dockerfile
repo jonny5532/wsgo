@@ -1,10 +1,11 @@
-FROM golang:1.22-bullseye
+ARG DEBIAN_VERSION=bullseye
+FROM golang:1.22-${DEBIAN_VERSION}
 
 RUN apt-get update && apt-get install build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libsqlite3-dev libreadline-dev libffi-dev curl libbz2-dev -y
 
 ARG PY_MAJ=3
 ARG PY_MIN=10
-ARG PY_PCH=11
+ARG PY_PCH=15
 ARG PY_PKGCONFIG=python-3.10-embed
 
 RUN cd /tmp \
@@ -33,9 +34,7 @@ ADD wsgo/ /code/wsgo/
 
 RUN mkdir bin
 
-#RUN --mount=type=cache,target=/root/.cache/go-build-py${PY_MAJ}${PY_MIN} \
 RUN CGO_LDFLAGS=-no-pie go build -o bin/wsgo
-
 
 
 ADD setup.py README.md /code/

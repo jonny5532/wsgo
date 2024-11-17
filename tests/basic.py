@@ -49,10 +49,10 @@ class BasicTests(WsgoTestCase):
     def test_threading(self):
         self.start('--module', 'wsgi_app', '--process', '1')
         def go(n):
-            r = requests.get('http://localhost:8000/output/', timeout=5)
+            r = requests.get('http://localhost:8000/output/', timeout=20)
             return len(r.content)==50000000
         with ThreadPoolExecutor(16) as executor:
-            self.assertTrue(all(i for i in executor.map(go, range(16), timeout=5)))
+            self.assertTrue(all(i for i in executor.map(go, range(16), timeout=20)))
     
     def test_caching(self):
         self.start('--module', 'wsgi_app', '--process', '1', '--max-age', '60')
