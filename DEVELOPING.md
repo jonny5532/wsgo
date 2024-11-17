@@ -13,7 +13,7 @@ docker run --rm -it --privileged linuxserver/qemu-static --reset -p yes
 
 ```sh
 ./build.sh x86_64
-./build.sh aarch64
+./build.sh arm64
 ```
 
 ```sh
