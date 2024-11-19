@@ -450,6 +450,9 @@ wsgo.RequestTimeoutException.__module__ = "wsgo"
 	C.free(unsafe.Pointer(s))
 	C.Py_IncRef(app_func)
 	C.Py_DecRef(app_dict)
+	if app_func == nil {
+		ExitProcessInvalid("Couldn't find 'application' entrypoint in module")
+	}
 
 	start_response_def.ml_name = C.CString("start_response")
 	start_response_def.ml_meth = C.PyCFunction(C.py_wsgi_start_response)
