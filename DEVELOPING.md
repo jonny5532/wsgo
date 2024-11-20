@@ -26,7 +26,7 @@ auditwheel repair --plat manylinux_2_17_x86_64 dist/*x86_64.whl
 
 docker run -it --rm -v $PWD:/work -w /work --platform linux/amd64 $(docker build -q --platform linux/amd64 -f Dockerfile.auditwheel .) auditwheel repair --plat manylinux_2_17_x86_64 dist/wsgo-0.0.??-*x86_64.whl
 
-docker run -it --rm -v $PWD:/work -w /work --platform linux/arm64 $(docker build -q --platform linux/arm64 -f Dockerfile.auditwheel .) auditwheel repair --plat manylinux_2_34_aarch64 dist/wsgo-0.0.??-*aarch64.whl
+docker run -it --rm -v $PWD:/work -w /work --platform linux/arm64 $(docker build -q --platform linux/arm64 -f Dockerfile.auditwheel .) auditwheel repair --plat manylinux_2_17_aarch64 dist/wsgo-0.0.??-*aarch64.whl
 ```
 
 ```sh

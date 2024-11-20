@@ -3,13 +3,11 @@
 
 PY_MAJ=${1:-3}
 PY_MIN=${2:-10}
-PY_PCH=${3:-11}
-PY_PKGCONFIG=${4:-python-3.10-embed}
+PY_PCH=${3:-15}
 
-ARCH=${5:-"x86_64"}
+ARCH=${4:-"x86_64"}
 
 PLATFORM=unknown
-DEBIAN_VERSION=bullseye
 
 
 case $ARCH in
@@ -18,8 +16,6 @@ case $ARCH in
     ;;
   arm64)
     PLATFORM=linux/arm64
-    # need to use newer debian version for arm64
-    DEBIAN_VERSION=bookworm
     ;;
   *)
     echo "Unsupported architecture: $ARCH"
@@ -28,16 +24,14 @@ case $ARCH in
 esac
 
 
-ACTION=${6:-"cp bin/wsgo /output/wsgo-cp${PY_MAJ}${PY_MIN}-linux_${ARCH}; cp dist/*.whl /output"}
+ACTION=${5:-"cp bin/wsgo /output/wsgo-cp${PY_MAJ}${PY_MIN}-linux_${ARCH}; cp dist/*.whl /output"}
 
 
 DOCKER_BUILDKIT=1 docker build \
  --platform ${PLATFORM} \
- --build-arg DEBIAN_VERSION=${DEBIAN_VERSION} \
  --build-arg PY_MAJ=${PY_MAJ} \
  --build-arg PY_MIN=${PY_MIN} \
  --build-arg PY_PCH=${PY_PCH} \
- --build-arg PY_PKGCONFIG=${PY_PKGCONFIG} \
  --progress plain \
  . || exit 1
 
@@ -49,10 +43,8 @@ exec docker run -it --rm -u $(id -u):$(id -g) \
   $( \
    DOCKER_BUILDKIT=1 docker build \
     --platform ${PLATFORM} \
-    --build-arg DEBIAN_VERSION=${DEBIAN_VERSION} \
     --build-arg PY_MAJ=${PY_MAJ} \
     --build-arg PY_MIN=${PY_MIN} \
     --build-arg PY_PCH=${PY_PCH} \
-    --build-arg PY_PKGCONFIG=${PY_PKGCONFIG} \
     -q . \
   ) bash -c "$ACTION"

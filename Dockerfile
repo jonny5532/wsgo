@@ -1,27 +1,23 @@
-ARG DEBIAN_VERSION=bullseye
-FROM golang:1.22-${DEBIAN_VERSION}
-
-RUN apt-get update && apt-get install build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libsqlite3-dev libreadline-dev libffi-dev curl libbz2-dev -y
-
 ARG PY_MAJ=3
 ARG PY_MIN=10
 ARG PY_PCH=15
-ARG PY_PKGCONFIG=python-3.10-embed
 
-RUN cd /tmp \
- && wget -O python.tar.gz https://www.python.org/ftp/python/${PY_MAJ}.${PY_MIN}.$(echo $PY_PCH | sed 's/\([0-9]*\).*/\1/g')/Python-${PY_MAJ}.${PY_MIN}.${PY_PCH}.tgz \
- && tar xzvf python.tar.gz
+# We don't run anything in this stage, but we'll steal files from it later.
+FROM golang:bullseye AS golang
 
-RUN cd /tmp/Python-${PY_MAJ}* \
- && ./configure --enable-shared \
- && make -j6 \
- && make altinstall
+# We prefer older bullseye since we can generate binaries with a low glibc version requirement.
+FROM python:${PY_MAJ}.${PY_MIN}.${PY_PCH}-bullseye AS python
 
-RUN LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/pip${PY_MAJ}.${PY_MIN} install --upgrade wheel setuptools requests
+# Copy entire golang toolchain across
+COPY --from=golang /usr/local/go /usr/local/go
 
-RUN cp /usr/local/lib/pkgconfig/${PY_PKGCONFIG}.pc /usr/local/lib/pkgconfig/python-3-embed.pc
+RUN pip install --upgrade wheel setuptools requests
 
+ENV PATH=$PATH:/usr/local/go/bin
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
+# Make the .pc file name consistent across all Python versions.
+RUN cp $(ls /usr/local/lib/pkgconfig/python*.pc | head -n1) /usr/local/lib/pkgconfig/python-3-embed.pc
 
 WORKDIR /code
 
@@ -39,4 +35,4 @@ RUN CGO_LDFLAGS=-no-pie go build -o bin/wsgo
 
 ADD setup.py README.md /code/
 
-RUN LD_LIBRARY_PATH=/usr/local/lib /usr/local/bin/python${PY_MAJ}.${PY_MIN} setup.py bdist_wheel
+RUN LD_LIBRARY_PATH=/usr/local/lib python setup.py bdist_wheel
