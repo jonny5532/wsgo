@@ -21,9 +21,13 @@ RUN cp $(ls /usr/local/lib/pkgconfig/python*.pc | head -n1) /usr/local/lib/pkgco
 
 WORKDIR /code
 
+# Install go dependencies
+
 ADD go.mod go.sum /code/
 
 RUN go mod download
+
+# Build the main binary
 
 ADD *.go /code/
 ADD wsgo/ /code/wsgo/
@@ -32,6 +36,7 @@ RUN mkdir bin
 
 RUN CGO_LDFLAGS=-no-pie go build -o bin/wsgo
 
+# Create the .whl package
 
 ADD setup.py README.md /code/
 
