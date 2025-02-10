@@ -3,6 +3,7 @@ package wsgo
 import (
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -12,6 +13,7 @@ import (
 var blocked map[string]time.Time
 var blockedCountByIp map[string]int
 var blockedMutex sync.Mutex
+var blockedCountByIpMutex sync.Mutex
 var waitSlots chan bool
 
 // The maximum number of requests that can be delayed simultaneously. If set too
@@ -34,9 +36,11 @@ func init() {
 
 func ExpireBlock(ip string) {
 	// assumes that blockedMutex is already held
+	blockedCountByIpMutex.Lock()
 	log.Println("- unblocked", ip, "after", blockedCountByIp[ip], "blocked requests")
 	delete(blocked, ip)
 	delete(blockedCountByIp, ip)
+	blockedCountByIpMutex.Unlock()
 }
 
 func ExpireStaleBlocks() {
@@ -61,18 +65,26 @@ func TryBlocking(w http.ResponseWriter, req *http.Request) bool {
 	ip := GetRemoteAddr(req)
 
 	blockedMutex.Lock()
-	defer blockedMutex.Unlock()
 	if blocked[ip] != (time.Time{}) {
 		if time.Now().Before(blocked[ip]) {
-			BlockDelay(int(math.Floor(time.Until(blocked[ip]).Seconds())))
+			delay := int(math.Floor(time.Until(blocked[ip]).Seconds()))
+			blockedMutex.Unlock()
+
+			BlockDelay(delay)
+
 			http.Error(w, "", 429)
+
+			blockedCountByIpMutex.Lock()
 			blockedCountByIp[ip]++
+			blockedCountByIpMutex.Unlock()
+
 			blockedCount.Add(1)
 			return true
 		}
 		// Block has expired, remove the entry
 		ExpireBlock(ip)
 	}
+	blockedMutex.Unlock()
 
 	return false
 }
@@ -115,6 +127,13 @@ func Block(req *http.Request, seconds int) {
 	if ip == "-" {
 		return
 	}
+
+	parsedIp := net.ParseIP(ip)
+	if parsedIp == nil || parsedIp.IsLoopback() || parsedIp.IsPrivate() {
+		// Don't block internal addresses
+		return
+	}
+	
 	log.Println("- blocking", ip, "for", seconds, "seconds")
 
 	blockedMutex.Lock()
