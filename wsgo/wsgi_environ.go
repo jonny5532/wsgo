@@ -97,12 +97,18 @@ func upperCaseAndUnderscore(r rune) rune {
 func PyDictSet(dict *C.PyObject, key string, value string) {
 	key_str := C.CString(key)
 	defer C.free(unsafe.Pointer(key_str))
-	key_obj := C.PyUnicode_FromString(key_str)
+
+	// WSGI uses latin-1 strings, even if the octets represent a different
+	// encoding (it gets away with it since latin-1 uses codepoints 0-255, and
+	// so do bytes)
+	key_obj := C.PyUnicode_DecodeLatin1(key_str, C.long(len(key)), nil)
 	defer C.Py_DecRef(key_obj)
 
 	value_str := C.CString(value)
 	defer C.free(unsafe.Pointer(value_str))
-	value_obj := C.PyUnicode_FromString(value_str)
+
+	// latin-1 again
+	value_obj := C.PyUnicode_DecodeLatin1(value_str, C.long(len(value)), nil)
 	defer C.Py_DecRef(value_obj)
 
 	if key_obj != nil && value_obj != nil {
@@ -113,7 +119,7 @@ func PyDictSet(dict *C.PyObject, key string, value string) {
 func PyDictSetObject(dict *C.PyObject, key string, obj *C.PyObject) {
 	key_str := C.CString(key)
 	defer C.free(unsafe.Pointer(key_str))
-	key_obj := C.PyUnicode_FromString(key_str)
+	key_obj := C.PyUnicode_DecodeLatin1(key_str, C.long(len(key)), nil)
 	defer C.Py_DecRef(key_obj)
 
 	if key_obj != nil && obj != nil {

@@ -172,3 +172,15 @@ class BasicTests(WsgoTestCase):
         self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '1')
         self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '2')
         self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '3')
+
+    def test_environ_encoding(self):
+        """
+        As per the WSGI spec, the values in the environ dictionary should be
+        encoded as ISO-8859-1, even if they're actually UTF-8.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1', '--request-timeout', '2')
+
+        # Check that the URL gets echoed back correctly
+        r = requests.get('http://localhost:8000/echo/Božja')
+        self.assertEqual(r.text, '/echo/Božja')

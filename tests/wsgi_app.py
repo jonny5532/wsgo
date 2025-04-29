@@ -56,7 +56,7 @@ def application(environ, start_response):
         return [("%.3f"%(time.time())).encode('utf-8')]
 
     start_response('200 OK', [
-        ('Content-Type','text/html'),
+        ('Content-Type','text/html; charset=utf-8'),
         ('Set-Cookie','cookie1=cookievalue1'),
         ('Set-Cookie','cookie2=cookievalue2'),
         ('Set-Cookie','cookie3=cookievalue3'),
@@ -72,7 +72,10 @@ def application(environ, start_response):
         return ret()
 
     if environ['PATH_INFO'].startswith('/echo/'):
-        return [environ['PATH_INFO'].encode('utf-8')]
+        # WSGI environ variables are always delivered as ISO-8859-1 strings even
+        # if they are some other encoding internally (like utf-8)
+        path_info = environ['PATH_INFO'].encode('iso-8859-1').decode('utf-8')
+        return [path_info.encode('utf-8')]
 
     if environ['PATH_INFO'].startswith('/close/'):
         class MyResponse:
