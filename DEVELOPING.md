@@ -9,6 +9,15 @@ docker run --rm -it --privileged linuxserver/qemu-static --reset -p yes
 (note that debian bullseye segfaults randomly on aarch64, so need to build with bookworm and suffer the higher GLIBC requirement).
 
 
+## Running tests locally
+
+```sh
+virtualenv /tmp/env && /tmp/env/bin/pip install requests
+source /tmp/env/bin/activate
+./build_version.sh 3 12 9 x86_64 && cp dist/wsgo-cp312-linux_x86_64 /tmp/env/bin/wsgo
+python3 -m tests
+```
+
 ## Deploying to PyPI
 
 ```sh

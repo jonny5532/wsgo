@@ -13,7 +13,7 @@ COPY --from=golang /usr/local/go /usr/local/go
 
 RUN pip install --upgrade wheel setuptools requests
 
-ENV PATH=$PATH:/usr/local/go/bin
+ENV PATH=$PATH:/usr/local/go/bin:/code/bin
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 
 # Make the .pc file name consistent across all Python versions.

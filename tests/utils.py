@@ -17,7 +17,7 @@ class WsgoTestCase(unittest.TestCase):
 
     def start(self, *args):
         self.process = subprocess.Popen(
-            ['/code/bin/wsgo'] + list(args),
+            ['wsgo'] + list(args),
             cwd=os.path.dirname(__file__),
             #start_new_session=True,
             stdout=subprocess.PIPE,
