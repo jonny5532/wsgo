@@ -47,7 +47,7 @@ func init() {
 }
 
 func ParkJob(job *RequestJob) {
-	log.Println("- waiting for retry", job.parkedId)
+	log.Println("- parked request", job.parkedId)
 
 	// TODO - limit max number of pending retries
 
@@ -93,10 +93,14 @@ func ParkJob(job *RequestJob) {
 		notification.action = DISCONNECT
 	case <-time.After(time.Duration(timeout) * time.Second):
 		// timeout
-		if timeoutAction == "http-204" {
+		if timeoutAction == "retry" {
+			notification.action = RETRY
+		} else if timeoutAction == "http-204" {
 			notification.action = HTTP_204
 		} else if timeoutAction == "http-504" {
 			notification.action = HTTP_504
+		} else {
+			notification.action = DISCONNECT
 		}
 	}
 
