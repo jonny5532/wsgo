@@ -3,6 +3,7 @@ package wsgo
 import (
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"unsafe"
 )
@@ -15,10 +16,16 @@ extern PyObject *create_wsgi_input(long request_id);
 import "C"
 
 func CreateWsgiEnvironment(requestId int64, req *http.Request) *C.PyObject {
+	// The WSGI spec requires the PATH_INFO to be URL-decoded
+	path, _err := url.PathUnescape(req.URL.Path)
+	if _err != nil {
+		return nil
+	}
 	environ := C.PyDict_New()
 	PyDictSet(environ, "REQUEST_METHOD", req.Method)
 	PyDictSet(environ, "SCRIPT_NAME", "")
-	PyDictSet(environ, "PATH_INFO", req.URL.Path)
+	PyDictSet(environ, "PATH_INFO", path)
+	// TODO - add REQUEST_URI as per uWSGI?
 	PyDictSet(environ, "QUERY_STRING", req.URL.RawQuery)
 	PyDictSet(environ, "CONTENT_TYPE", req.Header.Get("Content-type"))
 	PyDictSet(environ, "CONTENT_LENGTH", req.Header.Get("Content-length"))

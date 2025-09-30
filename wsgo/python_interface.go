@@ -286,7 +286,6 @@ uint64_t get_thread_cpu_time() {
 	return (t.tv_sec*1000) + (t.tv_nsec/1000000);
 }
 
-
 */
 import "C"
 
@@ -302,8 +301,13 @@ func CreateStartResponseFunction(requestId int64) *C.PyObject {
 
 // Calls the WSGI application function. Returns a new reference to the output.
 func CallApplication(requestId int64, req *http.Request) *C.PyObject {
+	env := CreateWsgiEnvironment(requestId, req)
+	if env == nil {
+		// Failed to create environment (bad request encoding etc)
+		return nil
+	}
 	app_func_args := C.PyTuple_New(2)
-	C.PyTuple_SetItem(app_func_args, 0, CreateWsgiEnvironment(requestId, req))  //steals
+	C.PyTuple_SetItem(app_func_args, 0, env)  //steals
 	C.PyTuple_SetItem(app_func_args, 1, CreateStartResponseFunction(requestId)) //steals
 
 	ret := C.PyObject_CallObject(app_func, app_func_args)
