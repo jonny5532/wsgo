@@ -27,6 +27,9 @@ python3 -m tests
 
 ```sh
 # Fix binary platform level using local auditwheel
+
+pip install auditwheel\<6.4
+
 auditwheel repair --plat manylinux_2_17_x86_64 dist/wsgo-0.0.24*x86_64.whl
 auditwheel repair --plat manylinux_2_34_x86_64 dist/wsgo-0.0.24-cp314-cp314-linux_x86_64.whl
 ```
