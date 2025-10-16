@@ -6,7 +6,7 @@ from setuptools.dist import Distribution
 
 from wheel.bdist_wheel import bdist_wheel
 
-wsgo_version = "0.0.23"
+wsgo_version = "0.0.24"
 
 from pathlib import Path
 this_directory = Path(__file__).parent
