@@ -3,12 +3,16 @@
 
 PY_MAJ=${1:-3}
 PY_MIN=${2:-10}
-PY_PCH=${3:-15}
 
-ARCH=${4:-"x86_64"}
+ARCH=${3:-"x86_64"}
+
+DEBIAN_RELEASE=bullseye
+
+if [ "$PY_MIN" -ge 14 ]; then
+  DEBIAN_RELEASE=bookworm
+fi
 
 PLATFORM=unknown
-
 
 case $ARCH in
   x86_64)
@@ -24,14 +28,14 @@ case $ARCH in
 esac
 
 
-ACTION=${5:-"cp bin/wsgo /output/wsgo-cp${PY_MAJ}${PY_MIN}-linux_${ARCH}; cp dist/*.whl /output"}
+ACTION=${4:-"cp bin/wsgo /output/wsgo-cp${PY_MAJ}${PY_MIN}-linux_${ARCH}; cp dist/*.whl /output"}
 
 
 DOCKER_BUILDKIT=1 docker build \
  --platform ${PLATFORM} \
  --build-arg PY_MAJ=${PY_MAJ} \
  --build-arg PY_MIN=${PY_MIN} \
- --build-arg PY_PCH=${PY_PCH} \
+ --build-arg DEBIAN_RELEASE=${DEBIAN_RELEASE} \
  --progress plain \
  . || exit 1
 
@@ -45,6 +49,6 @@ exec docker run -it --rm -u $(id -u):$(id -g) \
     --platform ${PLATFORM} \
     --build-arg PY_MAJ=${PY_MAJ} \
     --build-arg PY_MIN=${PY_MIN} \
-    --build-arg PY_PCH=${PY_PCH} \
+    --build-arg DEBIAN_RELEASE=${DEBIAN_RELEASE} \
     -q . \
   ) bash -c "$ACTION"

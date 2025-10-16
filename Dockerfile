@@ -1,12 +1,12 @@
 ARG PY_MAJ=3
 ARG PY_MIN=10
-ARG PY_PCH=15
+ARG DEBIAN_RELEASE=bullseye
 
 # We don't run anything in this stage, but we'll steal files from it later.
 FROM golang:bullseye AS golang
 
 # We prefer older bullseye since we can generate binaries with a low glibc version requirement.
-FROM python:${PY_MAJ}.${PY_MIN}.${PY_PCH}-bullseye AS python
+FROM python:${PY_MAJ}.${PY_MIN}-${DEBIAN_RELEASE} AS python
 
 # Copy entire golang toolchain across
 COPY --from=golang /usr/local/go /usr/local/go
