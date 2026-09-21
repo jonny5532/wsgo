@@ -426,3 +426,43 @@ class BasicTests(WsgoTestCase):
         r = requests.get('http://localhost:8000/')
         ours, theirs = [int(v) for v in r.text.split(',')]
         self.assertEqual(ours, theirs, "module dict refcount was over-released")
+
+    def test_wsgi_input_read_all(self):
+        """
+        read() with no size argument returns the whole request body.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+
+        body = b'x' * 1000 + b'y' * 3000000
+        r = requests.post('http://localhost:8000/read-all/', data=body, timeout=20)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, str(len(body)))
+
+    def test_wsgi_input_read_n(self):
+        """
+        read(n) returns exactly n bytes until EOF, like a buffered file.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+
+        body = b'z' * (2 * 1048576 + 123)
+        r = requests.post('http://localhost:8000/read-n/', data=body, timeout=20)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, '1048576,1048576,123')
+
+    def test_late_input_read_does_not_crash(self):
+        """
+        Reading wsgi.input after the request has finished must raise a Python
+        exception rather than dereferencing a nil reader and crashing.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+
+        self.assertEqual(requests.get('http://localhost:8000/late-read/').status_code, 200)
+
+        # The delayed read happens in an application thread after the request.
+        time.sleep(1.5)
+
+        # The process must still be alive and serving requests.
+        self.assertEqual(requests.get('http://localhost:8000/').status_code, 200)

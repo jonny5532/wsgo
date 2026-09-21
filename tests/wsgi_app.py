@@ -70,6 +70,37 @@ def application(environ, start_response):
         ])
         return [environ['REQUEST_METHOD'].encode('ascii')]
 
+    if environ['PATH_INFO']=='/read-all/':
+        # read() with no arguments must return the whole body.
+        data = environ['wsgi.input'].read()
+        start_response('200 OK', [('Content-Type','text/plain')])
+        return [str(len(data)).encode('ascii')]
+
+    if environ['PATH_INFO']=='/read-n/':
+        # read(n) must return exactly n bytes until EOF, like a buffered file.
+        lengths = []
+        while True:
+            data = environ['wsgi.input'].read(1048576)
+            lengths.append(len(data))
+            if len(data) < 1048576:
+                break
+        start_response('200 OK', [('Content-Type','text/plain')])
+        return [','.join(str(x) for x in lengths).encode('ascii')]
+
+    if environ['PATH_INFO']=='/late-read/':
+        # Simulate an application thread that keeps the environ (and thus
+        # wsgi.input) alive after the request has finished.
+        def late_read(env):
+            time.sleep(1.0)
+            try:
+                env['wsgi.input'].read(10)
+            except Exception:
+                pass
+
+        threading.Thread(target=late_read, args=(environ,), daemon=True).start()
+        start_response('200 OK', [('Content-Type','text/plain')])
+        return [b'started']
+
     if environ['PATH_INFO'].startswith('/park/'):
         return park_testing(environ, start_response)
     if environ['PATH_INFO'].startswith('/block/'):
