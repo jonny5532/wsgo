@@ -188,6 +188,24 @@ class BasicTests(WsgoTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, 'FAST-OK')
 
+    def test_non_iterable_response(self):
+        """
+        A response which is not iterable (e.g. the application returns None)
+        must be reported as a 502 without the response header already having
+        been sent, and without crashing the server.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1')
+
+        for path in ('/none/', '/notiterable/'):
+            r = requests.get('http://localhost:8000' + path)
+            self.assertEqual(r.status_code, 502, path)
+            self.assertEqual(r.text, 'Bad Gateway', path)
+
+            # The server must still be usable afterwards
+            self.assertEqual(
+                requests.get('http://localhost:8000/fast/').text, 'FAST-OK')
+
     def test_atexit(self):
         self.start('--module', 'wsgi_app', '--process', '1')
         time.sleep(0.5)

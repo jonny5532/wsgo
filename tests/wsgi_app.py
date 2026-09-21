@@ -38,6 +38,16 @@ def application(environ, start_response):
         start_response('200 OK', [('Content-Type','text/plain')])
         return [b'FAST-OK']
 
+    if environ['PATH_INFO']=='/none/':
+        # A common application bug: call start_response() but return None
+        # instead of an iterable.
+        start_response('200 OK', [('Content-Type','text/plain')])
+        return None
+
+    if environ['PATH_INFO']=='/notiterable/':
+        start_response('200 OK', [('Content-Type','text/plain')])
+        return 42
+
     if environ['PATH_INFO']=='/method/':
         start_response('200 OK', [
             ('Content-Type','text/plain'),

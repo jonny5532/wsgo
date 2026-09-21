@@ -312,26 +312,48 @@ func CallApplication(requestId int64, req *http.Request) *C.PyObject {
 	return ret
 }
 
-func ReadWsgiResponseToWriter(response *C.PyObject, w io.Writer) error {
+// GetWsgiResponseIter returns a new reference to an iterator over the WSGI
+// response, or nil if the response isn't iterable. Any Python exception is
+// printed.
+func GetWsgiResponseIter(response *C.PyObject) *C.PyObject {
 	iter := C.PyObject_GetIter(response)
-	defer C.Py_DecRef(iter)
-
 	if iter == nil {
 		C.PyErr_Print()
-		return errors.New("Bad Gateway")
+		return nil
 	}
 
 	if C._PyIter_Check(iter) == 0 {
 		log.Println("Response isn't iterable")
-		return errors.New("Bad Gateway")
+		C.Py_DecRef(iter)
+		return nil
 	}
+
+	return iter
+}
+
+// closeWsgiResponse calls .close() on the response if it has one. Must be
+// called with the GIL held.
+func closeWsgiResponse(response *C.PyObject) {
+	closeString := C.CString("close")
+	defer C.free(unsafe.Pointer(closeString))
+	if C.PyObject_HasAttrString(response, closeString) == 1 {
+		close := C.PyObject_GetAttrString(response, closeString)
+		C.PyObject_CallObject(close, nil)
+		C.Py_DecRef(close)
+	}
+}
+
+// WriteWsgiResponseToWriter writes the items produced by iter to w, and then
+// closes the response. The caller keeps ownership of iter. Must be called
+// with the GIL held.
+func WriteWsgiResponseToWriter(response *C.PyObject, iter *C.PyObject, w io.Writer) error {
+	defer closeWsgiResponse(response)
 
 	for {
 		item := C.PyIter_Next(iter)
 		if item == nil {
 			break
 		}
-		defer C.Py_DecRef(item)
 
 		var buf *C.char
 		var size C.Py_ssize_t
@@ -339,13 +361,15 @@ func ReadWsgiResponseToWriter(response *C.PyObject, w io.Writer) error {
 		ret := C.PyBytes_AsStringAndSize(item, &buf, &size)
 		if ret == -1 {
 			C.PyErr_Print()
-			break
+			C.Py_DecRef(item)
+			return errors.New("Bad Gateway")
 		}
 
 		// safe version: (does a memcpy internally)
 		v := C.GoBytes(unsafe.Pointer(buf), (C.int)(size))
-		// unsafe version: (doesn't, we trust that the writer won't keep a reference)
-		//v := unsafe.Slice((*byte)(unsafe.Pointer(buf)), size)
+		// Release the item immediately, so the whole response isn't retained
+		// in memory for the duration of the write.
+		C.Py_DecRef(item)
 
 		// Release the GIL whilst we write (does the fact we're borrowing a reference above matter???)
 		gilState := C.PyThreadState_Get()
@@ -358,21 +382,12 @@ func ReadWsgiResponseToWriter(response *C.PyObject, w io.Writer) error {
 
 		if err != nil {
 			log.Println("Failed to write response:", err)
-			break
+			return err
 		}
 		if n != int(size) {
 			log.Println("Only wrote", n, "of", size, "bytes!")
-			break
+			return io.ErrShortWrite
 		}
-	}
-
-	// We must call .close() on the response if present
-	closeString := C.CString("close")
-	defer C.free(unsafe.Pointer(closeString))
-	if C.PyObject_HasAttrString(response, closeString) == 1 {
-		close := C.PyObject_GetAttrString(response, closeString)
-		C.PyObject_CallObject(close, nil)
-		C.Py_DecRef(close)
 	}
 
 	return nil

@@ -284,10 +284,22 @@ func (worker *PythonWorker) HandleJob(job *RequestJob) {
 		return
 	}
 
+	// Obtain the response iterator before writing the header, so that a
+	// non-iterable response can be reported as a 502 rather than being
+	// appended to an already-started 200 response.
+	iter := GetWsgiResponseIter(ret)
+	if iter == nil {
+		BadGateway()
+		return
+	}
+	defer C.Py_DecRef(iter)
+
 	job.w.WriteHeader(responseStart.status)
 
-	if ReadWsgiResponseToWriter(ret, job.w) != nil {
-		BadGateway()
+	if WriteWsgiResponseToWriter(ret, iter, job.w) != nil {
+		// The header has already been sent, so the status can't be changed
+		// now; the error has already been logged.
+		errorCount.Add(1)
 	}
 }
 
