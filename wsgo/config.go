@@ -3,6 +3,7 @@ package wsgo
 import (
 	"errors"
 	"flag"
+	"log"
 	"strings"
 )
 
@@ -66,4 +67,11 @@ func ParseFlags() {
 	// Must be calculated after flag.Parse() so that a non-default --max-age
 	// enables stale-while-revalidate in TryCache.
 	maxAgeBeforeRefetch = maxAge / 2
+
+	if totalWorkers < 1 {
+		log.Fatalln("--workers must be at least 1")
+	}
+	if processes < 1 {
+		log.Fatalln("--processes must be at least 1")
+	}
 }

@@ -19,7 +19,6 @@ import (
 */
 import "C"
 
-
 type BackgroundJob struct {
 	function *C.PyObject
 }
@@ -61,7 +60,9 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	alreadyResponded := try_cache_status == HIT_BUT_EXPIRING_SOON
 
 	if AllWorkersAreStuck() {
-		log.Fatalln("All worker threads are stuck, quitting!")
+		// Last-resort safety valve: if no Python thread can make progress,
+		// exit so the process manager can restart us.
+		ExitIfAllWorkersStuck()
 	}
 
 	var cw *CacheWriter
@@ -83,7 +84,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 
 	var requestReader RequestReader
 
-	if requestBufferLength>0 && (req.Method == "POST" || req.Method == "PUT" || req.Method == "PATCH") {
+	if requestBufferLength > 0 && (req.Method == "POST" || req.Method == "PUT" || req.Method == "PATCH") {
 		reqBufLen, err := strconv.Atoi(req.Header.Get("Content-length"))
 		if err != nil || reqBufLen > requestBufferLength {
 			reqBufLen = requestBufferLength
@@ -96,13 +97,13 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	}
 
 	job := &RequestJob{
-		w:        cw,
-		req:      req,
-		r:	      requestReader,
-		done:     make(chan bool, 1),
+		w:    cw,
+		req:  req,
+		r:    requestReader,
+		done: make(chan bool, 1),
 	}
 
-	scheduler.HandleJob(job, time.Duration(requestTimeout) * time.Second)
+	scheduler.HandleJob(job, time.Duration(requestTimeout)*time.Second)
 
 	if ResolveAccel(job) {
 		return
@@ -142,13 +143,13 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 	// Go http's timeouts are rather crude.
 	server = &http.Server{
 		// Time to read the request body - 10 mins should be enough.
-		ReadTimeout:       600 * time.Second,
+		ReadTimeout: 600 * time.Second,
 		// Time to write the response. This includes the time to transfer
 		// X-Sendfile downloads, so needs to be decent. After all, we're
 		// time-limiting the scarce resource (Python threads) separately.
-		WriteTimeout:      3600 * time.Second,
+		WriteTimeout: 3600 * time.Second,
 		// Time to keep Keep-alive sockets open
-		IdleTimeout:       60 * time.Second,
+		IdleTimeout: 60 * time.Second,
 		// Time to read the request header.
 		ReadHeaderTimeout: 2 * time.Second,
 		Handler:           serverMux,
@@ -158,26 +159,26 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	shuttingDown := make(chan bool, 0)
 	go func() {
-        sig := <-sigs
-        log.Println("Process", process, "got", sig, "signal, shutting down...")
+		sig := <-sigs
+		log.Println("Process", process, "got", sig, "signal, shutting down...")
 		server.Shutdown(context.Background())
 
 		// grab the background job mutex, to wait on any currently running job
 		backgroundJobActive.Lock()
 
 		shuttingDown <- true
-    }()
+	}()
 
 	server.Serve(listener)
 
 	shutdownTimedOut := false
 	select {
-		case <-shuttingDown:
-			// Successfully shut down.
-		case <-time.After(time.Duration(requestTimeout) * time.Second):
-			// All requests should have completed by now, but something has hung.
-			// We'll still try and finalize the Python interpreter though.
-			shutdownTimedOut = true
+	case <-shuttingDown:
+		// Successfully shut down.
+	case <-time.After(time.Duration(requestTimeout) * time.Second):
+		// All requests should have completed by now, but something has hung.
+		// We'll still try and finalize the Python interpreter though.
+		shutdownTimedOut = true
 	}
 
 	// Now try to shut down the Python interpreter.
@@ -185,20 +186,20 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 	finalized := make(chan bool, 0)
 	go func() {
 		select {
-			case <-finalized:
-				// Finalized succesfully.
-			case <-time.After(15 * time.Second):
-				// Py_Finalize probably won't return, so just exit.
-				log.Println("Process", process, "finalize timed out, exiting.")
-				os.Exit(0)
+		case <-finalized:
+			// Finalized succesfully.
+		case <-time.After(15 * time.Second):
+			// Py_Finalize probably won't return, so just exit.
+			log.Println("Process", process, "finalize timed out, exiting.")
+			os.Exit(0)
 		}
 	}()
-	
-	// This needs to be called from the same thread that 
+
+	// This needs to be called from the same thread that
 	// called InitPythonInterpreter.
 	DeinitPythonInterpreter()
 	finalized <- true
-	
+
 	if shutdownTimedOut {
 		log.Println("Process", process, "shutdown timed out, exiting.")
 	} else {

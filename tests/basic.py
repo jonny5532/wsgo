@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 import glob
 import os
 import requests
+import subprocess
 import sys
 import tempfile
 import threading
@@ -482,3 +483,18 @@ class BasicTests(WsgoTestCase):
         # Parked (times out with a 204 after one second)
         self.assertEqual(requests.get('http://localhost:8000/accel-close/park', timeout=10).status_code, 204)
         self.assertEqual(requests.get('http://localhost:8000/accel-close/count').text, '2')
+
+    def test_zero_workers_rejected(self):
+        """
+        --workers 0 must be rejected at startup rather than serving a process
+        whose first request declares every worker stuck.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '0', drain=False)
+
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.fail("server started with --workers 0")
+
+        self.assertNotEqual(self.process.returncode, 0)

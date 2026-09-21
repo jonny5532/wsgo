@@ -2,8 +2,10 @@ package wsgo
 
 import (
 	"log"
+	"os"
 	"runtime"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -34,12 +36,33 @@ var workers []*PythonWorker
 var lastRequestId int64
 
 func AllWorkersAreStuck() bool {
+	if len(workers) == 0 {
+		// With no workers there is nothing to be stuck; the config
+		// validation rejects --workers 0 before startup anyway.
+		return false
+	}
 	for _, w := range workers {
 		if !w.stuck.Load() {
 			return false
 		}
 	}
 	return true
+}
+
+var exitOnStuckOnce sync.Once
+
+// ExitIfAllWorkersStuck terminates the process if every worker is stuck, so
+// that the process manager can restart it. Exiting uncleanly (rather than a
+// graceful shutdown, which would wait forever for the stuck workers) is
+// deliberate, and only one caller performs the exit.
+func ExitIfAllWorkersStuck() {
+	if !AllWorkersAreStuck() {
+		return
+	}
+	exitOnStuckOnce.Do(func() {
+		log.Println("All worker threads are stuck, quitting!")
+		os.Exit(1)
+	})
 }
 
 func GetRequestTimeoutException() *C.PyObject {
