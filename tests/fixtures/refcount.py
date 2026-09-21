@@ -1,7 +1,9 @@
-"""Test fixture: compares the refcount of this module's dictionary with an
-equivalent dynamically-created module. PyModule_GetDict returns a borrowed
-reference, so wsgo must not decref it during startup; doing so leaves the
-dictionary's refcount one too low."""
+"""Fixture for the PyModule_GetDict borrowed-reference test.
+
+Compares this module's dictionary refcount with an equivalent
+dynamically-created module. PyModule_GetDict returns a borrowed reference, so
+wsgo must not decref it during startup; doing so leaves the dictionary's
+refcount one too low."""
 
 import sys
 import types

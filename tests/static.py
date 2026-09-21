@@ -2,8 +2,6 @@ import gzip
 import os
 import tempfile
 
-import requests
-
 from .utils import WsgoTestCase
 
 
@@ -22,16 +20,13 @@ class StaticTests(WsgoTestCase):
             with open(os.path.join(webroot, 'file.txt'), 'w') as f:
                 f.write('hello')
 
-            self.start(
-                '--module', 'wsgi_app', '--process', '1',
-                '--static-map', '/media=' + webroot,
-            )
+            self.start('--static-map', '/media=' + webroot)
 
-            r = requests.get('http://localhost:8000/mediaevil/file.txt')
+            r = self.get('/mediaevil/file.txt')
             self.assertNotEqual(r.text, 'sneaky')
 
             # A genuine match still works.
-            self.assertEqual(requests.get('http://localhost:8000/media/file.txt').text, 'hello')
+            self.assertEqual(self.get('/media/file.txt').text, 'hello')
 
     def test_static_symlink_outside_root_is_not_served(self):
         """
@@ -50,15 +45,12 @@ class StaticTests(WsgoTestCase):
                 f.write('real')
             os.symlink('real.txt', os.path.join(webroot, 'alias.txt'))
 
-            self.start(
-                '--module', 'wsgi_app', '--process', '1',
-                '--static-map', '/=' + webroot,
-            )
+            self.start('--static-map', '/=' + webroot)
 
-            r = requests.get('http://localhost:8000/link.txt')
+            r = self.get('/link.txt')
             self.assertNotEqual(r.text, 'top-secret')
 
-            self.assertEqual(requests.get('http://localhost:8000/alias.txt').text, 'real')
+            self.assertEqual(self.get('/alias.txt').text, 'real')
 
     def test_static_gzip_negotiation(self):
         """
@@ -73,13 +65,9 @@ class StaticTests(WsgoTestCase):
             with open(os.path.join(webroot, 'file.txt.gz'), 'wb') as f:
                 f.write(gzip.compress(body))
 
-            self.start(
-                '--module', 'wsgi_app', '--process', '1',
-                '--static-map', '/=' + webroot,
-            )
+            self.start('--static-map', '/=' + webroot)
 
-            r = requests.get('http://localhost:8000/file.txt',
-                             headers={'Accept-Encoding': 'gzip'})
+            r = self.get('/file.txt', headers={'Accept-Encoding': 'gzip'})
             self.assertEqual(r.status_code, 200)
             self.assertEqual(r.headers.get('Content-Encoding'), 'gzip')
             self.assertEqual(r.headers.get('Vary'), 'Accept-Encoding')
@@ -87,15 +75,13 @@ class StaticTests(WsgoTestCase):
             self.assertEqual(r.content, body)
 
             # q=0 explicitly refuses gzip, so the plain file must be served.
-            r = requests.get('http://localhost:8000/file.txt',
-                             headers={'Accept-Encoding': 'gzip;q=0'})
+            r = self.get('/file.txt', headers={'Accept-Encoding': 'gzip;q=0'})
             self.assertEqual(r.status_code, 200)
             self.assertIsNone(r.headers.get('Content-Encoding'))
             self.assertEqual(r.content, body)
 
             # No gzip in the request means the plain file.
-            r = requests.get('http://localhost:8000/file.txt',
-                             headers={'Accept-Encoding': 'identity'})
+            r = self.get('/file.txt', headers={'Accept-Encoding': 'identity'})
             self.assertEqual(r.status_code, 200)
             self.assertIsNone(r.headers.get('Content-Encoding'))
             self.assertEqual(r.content, body)
@@ -109,11 +95,8 @@ class StaticTests(WsgoTestCase):
         with tempfile.TemporaryDirectory() as webroot:
             with open(os.path.join(webroot, 'post.txt'), 'w') as f:
                 f.write('static')
-            self.start(
-                '--module', 'wsgi_app', '--process', '1',
-                '--static-map', '/=' + webroot,
-            )
+            self.start('--static-map', '/=' + webroot)
 
-            r = requests.post('http://localhost:8000/post.txt', data=b'hello')
+            r = self.post('/post.txt', data=b'hello')
             self.assertEqual(r.status_code, 200)
             self.assertNotEqual(r.text, 'static')

@@ -1,48 +1,44 @@
-import os
-import random
-import requests
-import subprocess
-import sys
-import threading
 import time
+
 from .utils import WsgoTestCase
+
 
 class ParkTests(WsgoTestCase):
 
+    module = 'fixtures.park'
+
     def _park(self):
-        self.start('--module', 'wsgi_app', '--process', '1')
+        self.start()
 
-        def park():
-            return requests.get('http://localhost:8000/park/park')
-        park_response = self.pool.submit(park)
-
+        park_response = self.pool.submit(self.get, '/park/start')
         time.sleep(0.1)
 
-        self.assertEqual(park_response.done(), False)
+        self.assertFalse(park_response.done())
 
         return park_response
 
     def test_park_notify(self):
         park_response = self._park()
 
-        requests.get('http://localhost:8000/park/notify_wrong')
+        self.get('/park/notify-wrong')
 
         time.sleep(0.1)
 
         # Check our wrong-channel notification didn't work
-        self.assertEqual(park_response.done(), False)
+        self.assertFalse(park_response.done())
 
-        requests.get('http://localhost:8000/park/notify_204')
+        self.get('/park/notify-204')
 
-        self.assertEqual(park_response.result().status_code, 204)
+        self.assertEqual(park_response.result(timeout=10).status_code, 204)
 
     def test_park_notify_retry(self):
         park_response = self._park()
 
-        r = requests.get('http://localhost:8000/park/notify_retry')
+        self.get('/park/notify-retry')
 
-        self.assertEqual(park_response.result().status_code, 200)
-        self.assertEqual(park_response.result().text, 'retry_arg')
+        r = park_response.result(timeout=10)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, 'retry_arg')
 
     def test_park_retry_cannot_be_reparked(self):
         """
@@ -50,14 +46,12 @@ class ParkTests(WsgoTestCase):
         if the application responds with the park headers.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1')
+        self.start()
 
-        park_response = self.pool.submit(
-            requests.get, 'http://localhost:8000/park/reretry', timeout=15
-        )
+        park_response = self.pool.submit(self.get, '/park/retry-again', timeout=15)
 
         time.sleep(0.5)
-        requests.get('http://localhost:8000/park/notify_reretry')
+        self.get('/park/notify-retry-again')
 
         r = park_response.result(timeout=15)
         self.assertEqual(r.status_code, 200)

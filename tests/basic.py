@@ -3,87 +3,75 @@ import glob
 import os
 import requests
 import subprocess
-import sys
 import tempfile
 import threading
 import time
-import unittest
 
 from .utils import WsgoTestCase
+
 
 class BasicTests(WsgoTestCase):
 
     def test_get(self):
-        self.start('--module', 'wsgi_app', '--process', '1')
-        r = requests.get('http://localhost:8000')
-        self.assertEqual(r.status_code, 200)
-
-    def _disable_test_wait(self):
-        self.start('--module', 'wsgi_app', '--process', '1')
-        try:
-            r = requests.get('http://localhost:8000/wait/', timeout=0.001)
-        except requests.exceptions.ReadTimeout as e: pass
-        time.sleep(2)
-        self.assertNotIn("calling start_response", sys.stdout.getvalue())
+        self.start()
+        self.assertEqual(self.get('/').status_code, 200)
 
     def test_post(self):
-        self.start('--module', 'wsgi_app', '--process', '1')
-        r = requests.post('http://localhost:8000', data={
-            'key1':'value1 \U0001F600',
-            'key2\U0001F600':'value2',
+        self.start()
+        r = self.post('/', data={
+            'key1': 'value1 \U0001F600',
+            'key2\U0001F600': 'value2',
         })
         self.assertEqual(r.status_code, 200)
 
     def test_huge_post(self):
-        self.start('--module', 'wsgi_app', '--process', '1')
-        r = requests.post('http://localhost:8000', data={
-            'key1':'value1 \U0001F600',
-            'key2\U0001F600':'value2',
+        self.start()
+        r = self.post('/', data={
+            'key1': 'value1 \U0001F600',
+            'key2\U0001F600': 'value2',
         }, files={
-            'upload':b'0123456789'*1000000
+            'upload': b'0123456789' * 1000000
         })
         self.assertEqual(r.status_code, 200)
 
     def test_repeated_headers(self):
-        self.start('--module', 'wsgi_app', '--process', '1')
-        r = requests.get('http://localhost:8000')
+        self.start()
+        r = self.get('/')
         self.assertEqual(r.cookies['cookie1'], 'cookievalue1')
         self.assertEqual(r.cookies['cookie2'], 'cookievalue2')
         self.assertEqual(r.cookies['cookie3'], 'cookievalue3')
 
     def test_threading(self):
-        self.start('--module', 'wsgi_app', '--process', '1')
+        self.start()
+
         def go(n):
-            r = requests.get('http://localhost:8000/output/', timeout=20)
-            return len(r.content)==50000000
+            r = self.get('/stream/', timeout=20)
+            return len(r.content) == 50000000
+
         with ThreadPoolExecutor(16) as executor:
             self.assertTrue(all(i for i in executor.map(go, range(16), timeout=20)))
-    
+
     def test_caching(self):
-        self.start('--module', 'wsgi_app', '--process', '1', '--max-age', '60')
-        t = requests.get('http://localhost:8000/time/').text
+        self.start('--max-age', '60', module='fixtures.cache')
+
+        t = self.get('/cache/time').text
         time.sleep(0.01)
 
         # Should have been cached
-        self.assertEqual(requests.get('http://localhost:8000/time/').text, t)
+        self.assertEqual(self.get('/cache/time').text, t)
 
         time.sleep(0.01)
 
-        t2 = requests.get(
-            'http://localhost:8000/time/',
-            headers={'Cookie':'asdf=dsfg'}
-        ).text
+        t2 = self.get('/cache/time', headers={'Cookie': 'asdf=dsfg'}).text
 
         # Should not be cached due to Vary: Cookie
         self.assertNotEqual(t, t2)
-        
+
         time.sleep(0.01)
-        
+
         # Should have been cached against cookie
-        self.assertEqual(requests.get(
-            'http://localhost:8000/time/',
-            headers={'Cookie':'asdf=dsfg'}
-        ).text, t2)
+        self.assertEqual(
+            self.get('/cache/time', headers={'Cookie': 'asdf=dsfg'}).text, t2)
 
     def test_cache_ignores_method(self):
         """
@@ -92,18 +80,18 @@ class BasicTests(WsgoTestCase):
         the cache without ever reaching the application.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--max-age', '60')
+        self.start('--max-age', '60', module='fixtures.cache')
 
         # Cache a GET response
-        self.assertEqual(requests.get('http://localhost:8000/method/').text, 'GET')
+        self.assertEqual(self.get('/cache/method').text, 'GET')
 
         # A POST to the same URL must reach the application, not the cache
-        r = requests.post('http://localhost:8000/method/')
+        r = self.post('/cache/method')
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, 'POST')
 
         # And the GET entry should still be cached afterwards
-        self.assertEqual(requests.get('http://localhost:8000/method/').text, 'GET')
+        self.assertEqual(self.get('/cache/method').text, 'GET')
 
     def test_static_does_not_leak_fds(self):
         """
@@ -118,14 +106,10 @@ class BasicTests(WsgoTestCase):
 
             # GOGC=off stops the Go finalizer on os.File from closing the
             # descriptors, making the leak observable.
-            self.start(
-                '--module', 'wsgi_app', '--process', '1',
-                '--static-map', '/=' + webroot,
-                env={'GOGC': 'off'},
-            )
+            self.start('--static-map', '/=' + webroot, env={'GOGC': 'off'})
 
             for _ in range(50):
-                r = requests.get('http://localhost:8000/file.txt')
+                r = self.get('/file.txt')
                 self.assertEqual(r.status_code, 200)
                 self.assertEqual(r.text, 'hello')
 
@@ -151,21 +135,17 @@ class BasicTests(WsgoTestCase):
         the (now stale) timeout run to completion.
         """
 
-        self.start(
-            '--module', 'wsgi_app', '--process', '1', '--workers', '1',
-            '--request-timeout', '1',
-            drain=False,
-        )
+        self.start('--workers', '1',
+                   '--request-timeout', '1', drain=False, module='fixtures.slow')
 
         # Fill the stderr pipe so that the timeout handling below blocks on
         # its log call (the application writes more than the pipe buffer).
-        self.assertEqual(
-            requests.get('http://localhost:8000/fillstderr/').text, 'filling')
+        self.assertEqual(self.get('/slow/fill-stderr').text, 'filling')
         time.sleep(0.5)
 
         # The busy loop finishes just after the 1s request timeout expires,
         # so the timer fires but the request itself completes successfully.
-        r = requests.get('http://localhost:8000/busy/', timeout=10)
+        r = self.get('/slow/busy', timeout=10)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, 'BUSY-DONE')
 
@@ -177,13 +157,14 @@ class BasicTests(WsgoTestCase):
                     pass
             except Exception:
                 pass
+
         threading.Thread(target=drain, daemon=True).start()
         time.sleep(2.0)
 
         # The stale timeout must not have flagged the worker as stuck, nor be
         # delivered to this request.
         try:
-            r = requests.get('http://localhost:8000/fast/', timeout=10)
+            r = self.get('/slow/fast', timeout=10)
         except requests.exceptions.RequestException as e:
             self.fail('Server was taken down by a stale request timeout: %r' % e)
         self.assertEqual(r.status_code, 200)
@@ -196,16 +177,15 @@ class BasicTests(WsgoTestCase):
         been sent, and without crashing the server.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1')
+        self.start(module='fixtures.errors')
 
-        for path in ('/none/', '/notiterable/'):
-            r = requests.get('http://localhost:8000' + path)
+        for path in ('/errors/none', '/errors/not-iterable'):
+            r = self.get(path)
             self.assertEqual(r.status_code, 502, path)
             self.assertEqual(r.text, 'Bad Gateway', path)
 
             # The server must still be usable afterwards
-            self.assertEqual(
-                requests.get('http://localhost:8000/fast/').text, 'FAST-OK')
+            self.assertEqual(self.get('/errors/ok').text, 'ERRORS-OK')
 
     def test_page_cache_respects_size_limit(self):
         """
@@ -214,52 +194,50 @@ class BasicTests(WsgoTestCase):
         unique cacheable URLs indefinitely.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1',
-                   '--max-age', '3600', '--cache-size', '100000')
+        self.start('--max-age', '3600', '--cache-size', '100000', module='fixtures.cache')
 
-        url = 'http://localhost:8000/biguid/?id=0'
-        first = requests.get(url).text
+        url = '/cache/biguid?id=0'
+        first = self.get(url).text
         time.sleep(0.01)
-        self.assertEqual(requests.get(url).text, first)
+        self.assertEqual(self.get(url).text, first)
 
         # Fill the cache with more unique ~11KB responses than fit in the
         # 100KB limit. Each is requested twice so that it has been served,
         # which is what the old pruning logic used to keep entries alive.
         for i in range(1, 31):
-            u = 'http://localhost:8000/biguid/?id=%d' % i
-            requests.get(u)
+            u = '/cache/biguid?id=%d' % i
+            self.get(u)
             time.sleep(0.01)
-            requests.get(u)
+            self.get(u)
 
         # The first entry must have been evicted by now.
         time.sleep(0.01)
-        self.assertNotEqual(requests.get(url).text, first)
+        self.assertNotEqual(self.get(url).text, first)
 
     def test_atexit(self):
-        self.start('--module', 'wsgi_app', '--process', '1')
+        self.start()
         time.sleep(0.5)
         self.stop()
-        self.assertIn("atexit was called", sys.stdout.getvalue())
+        self.assertTrue(self.wait_for_output('atexit was called'))
 
     def test_timeout(self):
-        self.start('--module', 'wsgi_app', '--process', '1', '--request-timeout', '2')
+        self.start('--request-timeout', '2', module='fixtures.slow')
 
         def do(t, u):
             time.sleep(t)
-            r = requests.get('http://localhost:8000' + u)
-            return r.status_code
+            return self.get(u).status_code
 
         with ThreadPoolExecutor(15) as executor:
             proms = []
             for i in range(10):
                 # these should finish in time
-                proms.append(executor.submit(do, 1.5, '/wait/'))
+                proms.append(executor.submit(do, 1.5, '/slow/wait'))
             for i in range(5):
                 # this should time out whilst the other ones are still running
-                proms.append(executor.submit(do, 0, '/wait10/'))
+                proms.append(executor.submit(do, 0, '/slow/wait-long'))
 
             self.assertEqual(
-                [p.result(timeout=5) for p in proms], 
+                [p.result(timeout=5) for p in proms],
                 # 10 successes, 5 timeouts
                 [200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 502, 502, 502, 502, 502]
             )
@@ -277,16 +255,13 @@ class BasicTests(WsgoTestCase):
         worker.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--request-timeout', '1')
+        self.start('--request-timeout', '1', module='fixtures.slow')
 
         def do():
-            r = requests.get('http://localhost:8000/slowlog/', timeout=10)
-            return r.status_code
+            return self.get('/slow/log', timeout=10).status_code
 
         with ThreadPoolExecutor(5) as executor:
-            proms = []
-            for i in range(5):
-                proms.append(executor.submit(do))
+            proms = [executor.submit(do) for _ in range(5)]
 
             self.assertEqual(
                 sorted(p.result() for p in proms),
@@ -298,17 +273,16 @@ class BasicTests(WsgoTestCase):
         """
         Check that wsgo is calling .close() on the response object after the
         response has finished.
-        
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--request-timeout', '2')
+        self.start('--request-timeout', '2', module='fixtures.close')
 
         # close won't have been called yet
-        self.assertEqual(requests.get('http://localhost:8000/close/').text, '0')
+        self.assertEqual(self.get('/close/tracked').text, '0')
         # close should have been called once already
-        self.assertEqual(requests.get('http://localhost:8000/close/').text, '1')
+        self.assertEqual(self.get('/close/tracked').text, '1')
         # close should have been called twice now
-        self.assertEqual(requests.get('http://localhost:8000/close/').text, '2')
+        self.assertEqual(self.get('/close/tracked').text, '2')
 
     def test_thread_local(self):
         """
@@ -316,17 +290,16 @@ class BasicTests(WsgoTestCase):
 
         (Using PyGILState_Release instead of PyEval_ReleaseThread was causing
         thread local storage to be reset between requests).
-
         """
 
         # Start with only one thread
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1', '--request-timeout', '2')
+        self.start('--workers', '1', '--request-timeout', '2')
 
         # Check that thread local is actually retaining state between requests.
 
-        self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '1')
-        self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '2')
-        self.assertEqual(requests.get('http://localhost:8000/thread-local/').text, '3')
+        self.assertEqual(self.get('/thread-local/').text, '1')
+        self.assertEqual(self.get('/thread-local/').text, '2')
+        self.assertEqual(self.get('/thread-local/').text, '3')
 
     def test_environ_encoding(self):
         """
@@ -334,10 +307,10 @@ class BasicTests(WsgoTestCase):
         encoded as ISO-8859-1, even if they're actually UTF-8.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1', '--request-timeout', '2')
+        self.start('--workers', '1', '--request-timeout', '2')
 
         # Check that the URL gets echoed back correctly
-        r = requests.get('http://localhost:8000/echo/Božja')
+        r = self.get('/echo/Božja')
         self.assertEqual(r.text, '/echo/Božja')
 
     def test_bad_start_response_headers(self):
@@ -347,15 +320,15 @@ class BasicTests(WsgoTestCase):
         crashing the worker process.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1')
+        self.start(module='fixtures.errors')
 
-        for path in ['/badheaders/nonstring', '/badheaders/longtuple', '/badheaders/many']:
-            r = requests.get('http://localhost:8000' + path, timeout=15)
+        for path in ['/errors/bad-header-value', '/errors/bad-header-tuple',
+                     '/errors/many-headers']:
+            r = self.get(path, timeout=15)
             self.assertEqual(r.status_code, 502, 'expected 502 for ' + path)
 
         # The process must still be alive and serving requests.
-        r = requests.get('http://localhost:8000/')
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.get('/errors/ok').status_code, 200)
 
     def test_cache_refreshes_before_expiry(self):
         """
@@ -364,20 +337,20 @@ class BasicTests(WsgoTestCase):
         refresh, so the following request sees fresh content.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1', '--max-age', '4')
+        self.start('--workers', '1', '--max-age', '4', module='fixtures.cache')
 
-        t0 = requests.get('http://localhost:8000/time/').text
+        t0 = self.get('/cache/time').text
 
         # Immediately afterwards this is a plain cache hit with no refresh.
-        self.assertEqual(requests.get('http://localhost:8000/time/').text, t0)
+        self.assertEqual(self.get('/cache/time').text, t0)
 
         # Past half of the max-age: still served from cache...
         time.sleep(2.5)
-        self.assertEqual(requests.get('http://localhost:8000/time/').text, t0)
+        self.assertEqual(self.get('/cache/time').text, t0)
 
         # ...but a refresh has been queued, so fresh content appears shortly.
         time.sleep(0.5)
-        self.assertNotEqual(requests.get('http://localhost:8000/time/').text, t0)
+        self.assertNotEqual(self.get('/cache/time').text, t0)
 
     def test_response_chunks_are_released(self):
         """
@@ -385,8 +358,8 @@ class BasicTests(WsgoTestCase):
         not retained until the entire response has finished.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
-        r = requests.get('http://localhost:8000/refcount/')
+        self.start('--workers', '1', module='fixtures.errors')
+        r = self.get('/errors/chunk-refcount')
         self.assertEqual(r.text, 'chunk-0chunk-1chunk-2counts:2,2')
 
     def test_iterator_exception_does_not_leak(self):
@@ -395,13 +368,13 @@ class BasicTests(WsgoTestCase):
         be left pending in the worker's Python thread state.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+        self.start('--workers', '1', module='fixtures.errors')
 
-        r = requests.get('http://localhost:8000/baditer/')
+        r = self.get('/errors/iterator-raises')
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, 'partial')
 
-        self.assertEqual(requests.get('http://localhost:8000/errored/').text, 'no')
+        self.assertEqual(self.get('/errors/pending-exception').text, 'no')
 
     def test_close_exception_does_not_leak(self):
         """
@@ -409,11 +382,11 @@ class BasicTests(WsgoTestCase):
         be left pending in the worker's Python thread state.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+        self.start('--workers', '1', module='fixtures.errors')
 
-        self.assertEqual(requests.get('http://localhost:8000/close-raise/').status_code, 200)
+        self.assertEqual(self.get('/errors/close-raises').status_code, 200)
 
-        self.assertEqual(requests.get('http://localhost:8000/errored/').text, 'no')
+        self.assertEqual(self.get('/errors/pending-exception').text, 'no')
 
     def test_module_dict_reference_not_over_released(self):
         """
@@ -422,9 +395,9 @@ class BasicTests(WsgoTestCase):
         equivalent dynamically-created module.
         """
 
-        self.start('--module', 'refcount_module', '--process', '1', '--workers', '1')
+        self.start('--workers', '1', module='fixtures.refcount')
 
-        r = requests.get('http://localhost:8000/')
+        r = self.get('/')
         ours, theirs = [int(v) for v in r.text.split(',')]
         self.assertEqual(ours, theirs, "module dict refcount was over-released")
 
@@ -433,10 +406,10 @@ class BasicTests(WsgoTestCase):
         read() with no size argument returns the whole request body.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+        self.start('--workers', '1', module='fixtures.body')
 
         body = b'x' * 1000 + b'y' * 3000000
-        r = requests.post('http://localhost:8000/read-all/', data=body, timeout=20)
+        r = self.post('/body/read-all', data=body, timeout=20)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, str(len(body)))
 
@@ -445,10 +418,10 @@ class BasicTests(WsgoTestCase):
         read(n) returns exactly n bytes until EOF, like a buffered file.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+        self.start('--workers', '1', module='fixtures.body')
 
         body = b'z' * (2 * 1048576 + 123)
-        r = requests.post('http://localhost:8000/read-n/', data=body, timeout=20)
+        r = self.post('/body/read-n', data=body, timeout=20)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, '1048576,1048576,123')
 
@@ -458,15 +431,15 @@ class BasicTests(WsgoTestCase):
         exception rather than dereferencing a nil reader and crashing.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+        self.start('--workers', '1', module='fixtures.body')
 
-        self.assertEqual(requests.get('http://localhost:8000/late-read/').status_code, 200)
+        self.assertEqual(self.get('/body/late-read').status_code, 200)
 
         # The delayed read happens in an application thread after the request.
         time.sleep(1.5)
 
         # The process must still be alive and serving requests.
-        self.assertEqual(requests.get('http://localhost:8000/').status_code, 200)
+        self.assertEqual(self.get('/body/ok').status_code, 200)
 
     def test_accel_response_is_closed(self):
         """
@@ -474,15 +447,15 @@ class BasicTests(WsgoTestCase):
         but the response iterable must still have .close() called on it.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+        self.start('--workers', '1', module='fixtures.close')
 
         # X-Sendfile
-        self.assertEqual(requests.get('http://localhost:8000/accel-close/sendfile').status_code, 200)
-        self.assertEqual(requests.get('http://localhost:8000/accel-close/count').text, '1')
+        self.assertEqual(self.get('/close/accel-sendfile').status_code, 200)
+        self.assertEqual(self.get('/close/state').text, '1')
 
         # Parked (times out with a 204 after one second)
-        self.assertEqual(requests.get('http://localhost:8000/accel-close/park', timeout=10).status_code, 204)
-        self.assertEqual(requests.get('http://localhost:8000/accel-close/count').text, '2')
+        self.assertEqual(self.get('/close/accel-park', timeout=10).status_code, 204)
+        self.assertEqual(self.get('/close/state').text, '2')
 
     def test_zero_workers_rejected(self):
         """
@@ -490,7 +463,7 @@ class BasicTests(WsgoTestCase):
         whose first request declares every worker stuck.
         """
 
-        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '0', drain=False)
+        self.start('--workers', '0', drain=False)
 
         try:
             self.process.wait(timeout=5)
