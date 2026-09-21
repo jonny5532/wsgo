@@ -4,6 +4,7 @@ import os
 import requests
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -133,6 +134,59 @@ class BasicTests(WsgoTestCase):
             ]
             leaked = [path for path in open_fds if path.endswith('file.txt')]
             self.assertEqual(leaked, [])
+
+    def test_stale_timeout_does_not_affect_next_request(self):
+        """
+        If a request completes at almost exactly the same moment as its
+        request timeout fires, the timeout must not be delivered afterwards.
+        Delivering it late raises RequestTimeoutException in a later request
+        and leaves the worker flagged as stuck (which, with one worker,
+        causes the process to be killed).
+
+        The server's stderr pipe is deliberately not drained, and is filled
+        by the application, so that the timeout goroutine blocks in its log
+        call between the timer expiring and flagging the worker as stuck.
+        Once the request has completed successfully we drain the pipe, letting
+        the (now stale) timeout run to completion.
+        """
+
+        self.start(
+            '--module', 'wsgi_app', '--process', '1', '--workers', '1',
+            '--request-timeout', '1',
+            drain=False,
+        )
+
+        # Fill the stderr pipe so that the timeout handling below blocks on
+        # its log call (the application writes more than the pipe buffer).
+        self.assertEqual(
+            requests.get('http://localhost:8000/fillstderr/').text, 'filling')
+        time.sleep(0.5)
+
+        # The busy loop finishes just after the 1s request timeout expires,
+        # so the timer fires but the request itself completes successfully.
+        r = requests.get('http://localhost:8000/busy/', timeout=10)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, 'BUSY-DONE')
+
+        # Drain stderr, letting the now-stale timeout goroutine run to
+        # completion.
+        def drain():
+            try:
+                while self.process.stderr.read(65536):
+                    pass
+            except Exception:
+                pass
+        threading.Thread(target=drain, daemon=True).start()
+        time.sleep(2.0)
+
+        # The stale timeout must not have flagged the worker as stuck, nor be
+        # delivered to this request.
+        try:
+            r = requests.get('http://localhost:8000/fast/', timeout=10)
+        except requests.exceptions.RequestException as e:
+            self.fail('Server was taken down by a stale request timeout: %r' % e)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, 'FAST-OK')
 
     def test_atexit(self):
         self.start('--module', 'wsgi_app', '--process', '1')

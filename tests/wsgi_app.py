@@ -1,6 +1,7 @@
 import atexit
 import hashlib
 import logging
+import os
 import time
 import threading
 import wsgo
@@ -10,7 +11,33 @@ close_count = 0
 
 logger = logging.getLogger('test_logger')
 
+def _fill_stderr():
+    # Fill the server's stderr pipe so that a Go log call blocks until the
+    # test drains it.
+    chunk = b'x' * 65536
+    for _ in range(64):
+        try:
+            os.write(2, chunk)
+        except OSError:
+            break
+
 def application(environ, start_response):
+    if environ['PATH_INFO']=='/fillstderr/':
+        threading.Thread(target=_fill_stderr, daemon=True).start()
+        start_response('200 OK', [('Content-Type','text/plain')])
+        return [b'filling']
+
+    if environ['PATH_INFO']=='/busy/':
+        end = time.monotonic() + 1.05
+        while time.monotonic() < end:
+            pass
+        start_response('200 OK', [('Content-Type','text/plain')])
+        return [b'BUSY-DONE']
+
+    if environ['PATH_INFO']=='/fast/':
+        start_response('200 OK', [('Content-Type','text/plain')])
+        return [b'FAST-OK']
+
     if environ['PATH_INFO']=='/method/':
         start_response('200 OK', [
             ('Content-Type','text/plain'),

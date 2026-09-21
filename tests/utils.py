@@ -15,7 +15,7 @@ class WsgoTestCase(unittest.TestCase):
             self.process.terminate()
             self.process.wait()
 
-    def start(self, *args, env=None):
+    def start(self, *args, env=None, drain=True):
         proc_env = os.environ.copy()
         if env:
             proc_env.update(env)
@@ -44,8 +44,9 @@ class WsgoTestCase(unittest.TestCase):
         print(self.process.stderr.readline())
 
         # Then shuffle the rest through with threads
-        threading.Thread(target=passthrough, args=(self.process.stdout, sys.stdout)).start()
-        threading.Thread(target=passthrough, args=(self.process.stderr, sys.stderr)).start()
+        if drain:
+            threading.Thread(target=passthrough, args=(self.process.stdout, sys.stdout)).start()
+            threading.Thread(target=passthrough, args=(self.process.stderr, sys.stderr)).start()
 
     def stop(self):
         self.process.terminate()

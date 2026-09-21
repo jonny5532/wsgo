@@ -26,14 +26,20 @@ var blockedCount atomic.Uint64
 func PrintPythonTraceback() {
 	runtime.LockOSThread()
 	gilState := C.PyGILState_Ensure()
+	printPythonTracebackLocked()
+	C.PyGILState_Release(gilState)
+	runtime.UnlockOSThread()
+}
+
+// printPythonTracebackLocked prints stack traces of all Python threads.
+// It must be called with the GIL held.
+func printPythonTracebackLocked() {
 	cmd := C.CString(`
 import faulthandler
 faulthandler.dump_traceback(all_threads=True)
 `)
 	defer C.free(unsafe.Pointer(cmd))
 	C.PyRun_SimpleStringFlags(cmd, nil)
-	C.PyGILState_Release(gilState)
-	runtime.UnlockOSThread()
 }
 
 func PrintRequestStats() {

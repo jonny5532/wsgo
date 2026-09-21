@@ -94,48 +94,54 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 	}
 
 
-	pydone := make(chan bool, 1)
+	// `finished` is set by the worker once the task has completed, whilst it
+	// still holds the GIL. The timeout goroutine checks it whilst holding the
+	// GIL, so once the task has finished, a stale timer can no longer inject a
+	// RequestTimeoutException into a later request.
+	var finished atomic.Bool
+	pydone := make(chan struct{})
 	thread_id := C.PyThread_get_thread_ident()
 
 	if timeout > 0 {
 		// Add a request timeout to interrupt the worker
+		timer := time.NewTimer(time.Duration(timeout) * time.Second)
 		go func() {
+			defer timer.Stop()
+
 			select {
 			case <-pydone:
 				return
-			// case <-job.req.Context().Done():
-			// 	// Other end hung up
-			// 	fmt.Println("Other end disconnected!")
-
-			// 	// Give the script a chance to exit cleanly
-			// 	time.Sleep(200 * time.Millisecond)
-
-			// 	select {
-			// 		case <-pydone:
-			// 			return
-			// 		default:
-			// 	}
-
-			case <-time.After(time.Duration(timeout) * time.Second):
-				log.Println("Task timed out!")
-
-				// Flag the worker as stuck, so we can detect whether our
-				// attempt at interrupting it hasn't worked
-				worker.stuck.Store(true)
-
-				// Print a fancy traceback so we can see where it is stuck
-				PrintPythonTraceback()
+			case <-timer.C:
 			}
 
+			log.Println("Task timed out!")
+
+			// The GIL is held from here until the exception has been set,
+			// which stops the worker from finishing the task underneath us.
 			runtime.LockOSThread()
 			gs := C.PyGILState_Ensure()
 
+			if finished.Load() {
+				// The task completed before we acquired the GIL; the timeout
+				// is stale, and delivering it now would raise
+				// RequestTimeoutException in a later request.
+				C.PyGILState_Release(gs)
+				runtime.UnlockOSThread()
+				return
+			}
+
+			// Flag the worker as stuck, so we can detect whether our
+			// attempt at interrupting it hasn't worked
+			worker.stuck.Store(true)
+
+			// Print a fancy traceback so we can see where it is stuck
+			printPythonTracebackLocked()
+
 			exc := GetRequestTimeoutException()
-			defer C.Py_DecRef(exc)
-	
 			if C.PyThreadState_SetAsyncExc(thread_id, exc) != 1 {
 				log.Println("Failed to issue RequestTimeoutException to stuck worker!")
 			}
+			C.Py_DecRef(exc)
 
 			C.PyGILState_Release(gs)
 			runtime.UnlockOSThread()
@@ -146,6 +152,10 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 
 	task()
 
+	// The task has finished; record it (still holding the GIL) before the
+	// timeout goroutine can check it.
+	finished.Store(true)
+
 	if worker.stuck.Load() {
 		// Worker was stuck, so we need to clean up the side-effects of
 		// unsticking it.
@@ -153,7 +163,7 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 	}
 
 	worker.stuck.Store(false)
-	pydone <- true
+	close(pydone)
 
 	// We have to use PyEval_SaveThread rather than PyGILState_Release here because
 	// we want to keep the thread state around for the next time we run a task.
