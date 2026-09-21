@@ -64,7 +64,9 @@ const (
 )
 
 func DeriveCacheKey(req *http.Request) string {
-	return req.Host + req.URL.Path + "?" + req.URL.RawQuery
+	// The request method is part of the key so that a cached response can
+	// never be served in response to a different method.
+	return req.Method + " " + req.Host + req.URL.Path + "?" + req.URL.RawQuery
 }
 
 func TryCache(w http.ResponseWriter, req *http.Request) TryCacheResponse {

@@ -80,6 +80,26 @@ class BasicTests(WsgoTestCase):
             headers={'Cookie':'asdf=dsfg'}
         ).text, t2)
 
+    def test_cache_ignores_method(self):
+        """
+        A cached GET response must never be served in response to a different
+        HTTP method, as that lets state-changing requests be answered from
+        the cache without ever reaching the application.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--max-age', '60')
+
+        # Cache a GET response
+        self.assertEqual(requests.get('http://localhost:8000/method/').text, 'GET')
+
+        # A POST to the same URL must reach the application, not the cache
+        r = requests.post('http://localhost:8000/method/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, 'POST')
+
+        # And the GET entry should still be cached afterwards
+        self.assertEqual(requests.get('http://localhost:8000/method/').text, 'GET')
+
     def test_atexit(self):
         self.start('--module', 'wsgi_app', '--process', '1')
         time.sleep(0.5)

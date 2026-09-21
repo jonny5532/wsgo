@@ -11,6 +11,13 @@ close_count = 0
 logger = logging.getLogger('test_logger')
 
 def application(environ, start_response):
+    if environ['PATH_INFO']=='/method/':
+        start_response('200 OK', [
+            ('Content-Type','text/plain'),
+            ('Cache-Control','max-age=60'),
+        ])
+        return [environ['REQUEST_METHOD'].encode('ascii')]
+
     if environ['PATH_INFO'].startswith('/park/'):
         return park_testing(environ, start_response)
     if environ['PATH_INFO'].startswith('/block/'):

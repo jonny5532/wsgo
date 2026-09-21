@@ -42,7 +42,10 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	try_cache_status := TryCache(w, req)
+	try_cache_status := MISS
+	if req.Method == "GET" || req.Method == "HEAD" || req.Method == "OPTIONS" {
+		try_cache_status = TryCache(w, req)
+	}
 	if try_cache_status == HIT {
 		LogRequest(
 			req,
