@@ -13,13 +13,13 @@ import "C"
 var parkedJobMutex sync.Mutex
 
 type ParkedJob struct {
-	job               *RequestJob
-	notify            chan ParkedJobNotification
+	job    *RequestJob
+	notify chan ParkedJobNotification
 }
 
 type ParkedJobNotification struct {
-	action   int
-	arg      string
+	action int
+	arg    string
 }
 
 const (
@@ -35,7 +35,7 @@ func splitOnCommas(str string) []string {
 	var ret []string
 	for _, s := range strings.Split(str, ",") {
 		s = strings.TrimSpace(s)
-		if len(s)>0 {
+		if len(s) > 0 {
 			ret = append(ret, s)
 		}
 	}
@@ -44,6 +44,13 @@ func splitOnCommas(str string) []string {
 
 func init() {
 	parkedJobs = make(map[string][]*ParkedJob)
+}
+
+func newParkedJob(job *RequestJob) *ParkedJob {
+	return &ParkedJob{
+		job:    job,
+		notify: make(chan ParkedJobNotification, 1),
+	}
 }
 
 func ParkJob(job *RequestJob) {
@@ -57,7 +64,7 @@ func ParkJob(job *RequestJob) {
 	timeout, timeoutAction := 7200, "http-204"
 
 	timeoutBits := strings.Split(job.w.Header().Get("X-WSGo-Park-Timeout"), " ")
-	if len(timeoutBits)==2 && (timeoutBits[1]=="retry" || timeoutBits[1]=="disconnect" || timeoutBits[1]=="http-204" || timeoutBits[1]=="http-504") {
+	if len(timeoutBits) == 2 && (timeoutBits[1] == "retry" || timeoutBits[1] == "disconnect" || timeoutBits[1] == "http-204" || timeoutBits[1] == "http-504") {
 		t, err := strconv.Atoi(timeoutBits[0])
 		if err == nil && t > 0 {
 			timeout = t
@@ -70,14 +77,11 @@ func ParkJob(job *RequestJob) {
 		job.w.Header().Del(k)
 	}
 
-	park := ParkedJob{
-		job: job,
-		notify: make(chan ParkedJobNotification, 0),
-	}
+	park := newParkedJob(job)
 
 	parkedJobMutex.Lock()
 	for _, s := range parkedIds {
-		parkedJobs[s] = append(parkedJobs[s], &park)
+		parkedJobs[s] = append(parkedJobs[s], park)
 	}
 	parkedJobMutex.Unlock()
 
@@ -108,8 +112,8 @@ func ParkJob(job *RequestJob) {
 	// remove job from lists
 	for _, s := range parkedIds {
 		for i, v := range parkedJobs[s] {
-			if v==&park {
-				if len(parkedJobs[s])==1 {
+			if v == park {
+				if len(parkedJobs[s]) == 1 {
 					delete(parkedJobs, s)
 				} else {
 					parkedJobs[s] = append(parkedJobs[s][:i], parkedJobs[s][i+1:]...)
@@ -119,7 +123,7 @@ func ParkJob(job *RequestJob) {
 		}
 	}
 	parkedJobMutex.Unlock()
-	
+
 	log.Println("- retry", job.parkedId, "notified: action =", notification.action)
 
 	if notification.action == RETRY {
@@ -136,7 +140,7 @@ func ParkJob(job *RequestJob) {
 	}
 
 	var requestReader RequestReader
-	if requestBufferLength>0 && (job.req.Method == "POST" || job.req.Method == "PUT" || job.req.Method == "PATCH") {
+	if requestBufferLength > 0 && (job.req.Method == "POST" || job.req.Method == "PUT" || job.req.Method == "PATCH") {
 		err := job.r.Rewind()
 		if err != nil {
 			// couldn't rewind, maybe we didn't store the whole request?
@@ -155,29 +159,28 @@ func ParkJob(job *RequestJob) {
 	cw := NewNonCachingCacheWriter(job.w.writer)
 
 	newJob := &RequestJob{
-		w:        cw,
-		req:      job.req,
-		r:	      requestReader,
-		done:     make(chan bool, 1),
+		w:    cw,
+		req:  job.req,
+		r:    requestReader,
+		done: make(chan bool, 1),
 	}
-	scheduler.HandleJob(newJob, time.Duration(requestTimeout) * time.Second)
+	scheduler.HandleJob(newJob, time.Duration(requestTimeout)*time.Second)
 
 	// we deliberately don't handle any accels from retries
 
 	cw.Flush()
 }
 
-//export go_notify_parked
-func go_notify_parked(parked_id *C.char, parked_id_length C.int, action C.int, param *C.char, param_length C.int) {
-	parkedId := C.GoStringN(parked_id, parked_id_length)
+// NotifyParked wakes up any parked requests waiting on one of the supplied
+// comma-separated channels. It is safe to call before the parked job has
+// started waiting on its notify channel: the notification is queued in the
+// channel's buffer rather than dropped.
+func NotifyParked(parkedId string, action int, arg string) {
 	parkedIds := splitOnCommas(parkedId)
 
 	notification := ParkedJobNotification{
-		action: int(action),
-	}
-
-	if param != nil {
-		notification.arg = C.GoStringN(param, param_length)
+		action: action,
+		arg:    arg,
 	}
 
 	parkedJobMutex.Lock()
@@ -190,4 +193,16 @@ func go_notify_parked(parked_id *C.char, parked_id_length C.int, action C.int, p
 		}
 	}
 	parkedJobMutex.Unlock()
+}
+
+//export go_notify_parked
+func go_notify_parked(parked_id *C.char, parked_id_length C.int, action C.int, param *C.char, param_length C.int) {
+	parkedId := C.GoStringN(parked_id, parked_id_length)
+
+	arg := ""
+	if param != nil {
+		arg = C.GoStringN(param, param_length)
+	}
+
+	NotifyParked(parkedId, int(action), arg)
 }
