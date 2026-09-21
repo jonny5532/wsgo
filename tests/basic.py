@@ -377,3 +377,39 @@ class BasicTests(WsgoTestCase):
         # ...but a refresh has been queued, so fresh content appears shortly.
         time.sleep(0.5)
         self.assertNotEqual(requests.get('http://localhost:8000/time/').text, t0)
+
+    def test_response_chunks_are_released(self):
+        """
+        Each yielded chunk must be released as soon as it has been written,
+        not retained until the entire response has finished.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+        r = requests.get('http://localhost:8000/refcount/')
+        self.assertEqual(r.text, 'chunk-0chunk-1chunk-2counts:2,2')
+
+    def test_iterator_exception_does_not_leak(self):
+        """
+        If an application's response iterator raises, the exception must not
+        be left pending in the worker's Python thread state.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+
+        r = requests.get('http://localhost:8000/baditer/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, 'partial')
+
+        self.assertEqual(requests.get('http://localhost:8000/errored/').text, 'no')
+
+    def test_close_exception_does_not_leak(self):
+        """
+        If an application's response .close() raises, the exception must not
+        be left pending in the worker's Python thread state.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+
+        self.assertEqual(requests.get('http://localhost:8000/close-raise/').status_code, 200)
+
+        self.assertEqual(requests.get('http://localhost:8000/errored/').text, 'no')

@@ -378,27 +378,54 @@ func GetWsgiResponseIter(response *C.PyObject) *C.PyObject {
 	return iter
 }
 
-// closeWsgiResponse calls .close() on the response if it has one. Must be
-// called with the GIL held.
-func closeWsgiResponse(response *C.PyObject) {
+// closeWsgiResponse calls .close() on the response if it has one, returning
+// an error if the attribute can't be fetched or the call fails. Any Python
+// exception is printed and cleared. Must be called with the GIL held.
+func closeWsgiResponse(response *C.PyObject) error {
 	closeString := C.CString("close")
 	defer C.free(unsafe.Pointer(closeString))
 	if C.PyObject_HasAttrString(response, closeString) == 1 {
 		close := C.PyObject_GetAttrString(response, closeString)
-		C.PyObject_CallObject(close, nil)
+		if close == nil {
+			C.PyErr_Print()
+			return errors.New("Bad Gateway")
+		}
+		ret := C.PyObject_CallObject(close, nil)
 		C.Py_DecRef(close)
+		if ret == nil {
+			C.PyErr_Print()
+			return errors.New("Bad Gateway")
+		}
+		C.Py_DecRef(ret)
 	}
+	return nil
 }
 
 // WriteWsgiResponseToWriter writes the items produced by iter to w, and then
 // closes the response. The caller keeps ownership of iter. Must be called
 // with the GIL held.
 func WriteWsgiResponseToWriter(response *C.PyObject, iter *C.PyObject, w io.Writer) error {
-	defer closeWsgiResponse(response)
+	writeErr := writeWsgiResponseBody(iter, w)
+	closeErr := closeWsgiResponse(response)
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
+}
 
+// writeWsgiResponseBody iterates the response and writes each chunk. Must be
+// called with the GIL held.
+func writeWsgiResponseBody(iter *C.PyObject, w io.Writer) error {
 	for {
 		item := C.PyIter_Next(iter)
 		if item == nil {
+			// NULL is returned both at clean exhaustion and when the
+			// iterator raised. Don't leave an exception pending on the
+			// worker's thread state for the next request to trip over.
+			if C.PyErr_Occurred() != nil {
+				C.PyErr_Print()
+				return errors.New("Bad Gateway")
+			}
 			break
 		}
 

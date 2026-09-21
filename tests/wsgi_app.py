@@ -1,10 +1,17 @@
 import atexit
+import ctypes
 import hashlib
 import logging
 import os
+import sys
 import time
 import threading
 import wsgo
+
+# Direct access to the Python error indicator, so tests can check that wsgo
+# doesn't leak an exception from one request into the next.
+_pyerr_occurred = ctypes.pythonapi.PyErr_Occurred
+_pyerr_occurred.restype = ctypes.c_void_p
 
 thread_local = threading.local()
 close_count = 0
@@ -69,6 +76,19 @@ def application(environ, start_response):
         return block_testing(environ, start_response)
     if environ['PATH_INFO'].startswith('/badheaders/'):
         return badheaders_testing(environ, start_response)
+    if environ['PATH_INFO'] == '/refcount/':
+        start_response('200 OK', [('Content-Type', 'text/plain')])
+        return RefcountResponse()
+    if environ['PATH_INFO'] == '/baditer/':
+        start_response('200 OK', [('Content-Type', 'text/plain')])
+        return BadIterResponse()
+    if environ['PATH_INFO'] == '/close-raise/':
+        start_response('200 OK', [('Content-Type', 'text/plain')])
+        return RaiseCloseResponse()
+    if environ['PATH_INFO'] == '/errored/':
+        errored = b'yes' if _pyerr_occurred() else b'no'
+        start_response('200 OK', [('Content-Type', 'text/plain')])
+        return [errored]
 
     h = hashlib.md5()
     if environ['REQUEST_METHOD']=='POST':
@@ -187,6 +207,46 @@ def park_testing(environ, start_response):
             ('Content-Type','text/html'),
         ])
         return [b"notified!"]
+
+class RefcountResponse:
+    """Reports the refcount of the previously yielded chunk while the
+    server is iterating the response. wsgo must release each chunk as soon
+    as it has been written, rather than retaining the whole response."""
+
+    def __init__(self):
+        self.items = []
+        self.counts = []
+
+    def __iter__(self):
+        for i in range(3):
+            self.items.append(b'chunk-%d' % i)
+            if len(self.items) > 1:
+                self.counts.append(sys.getrefcount(self.items[-2]))
+            yield self.items[-1]
+        yield ('counts:' + ','.join(str(c) for c in self.counts)).encode()
+
+
+class BadIterResponse:
+    """Yields one chunk, then raises. It defines close() so that wsgo's
+    close-attribute check can't accidentally clear the leaked error."""
+
+    def __iter__(self):
+        yield b'partial'
+        raise ValueError('iterator-boom')
+
+    def close(self):
+        pass
+
+
+class RaiseCloseResponse:
+    """A response whose .close() raises."""
+
+    def __iter__(self):
+        return iter([])
+
+    def close(self):
+        raise ValueError('close-boom')
+
 
 def badheaders_testing(environ, start_response):
     """Routes that exercise malformed start_response() arguments. wsgo must
