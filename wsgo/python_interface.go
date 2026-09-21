@@ -537,11 +537,12 @@ wsgo.RequestTimeoutException.__module__ = "wsgo"
 	s = C.CString("application")
 	app_func = C.PyDict_GetItemString(app_dict, s)
 	C.free(unsafe.Pointer(s))
-	C.Py_IncRef(app_func)
-	C.Py_DecRef(app_dict)
+	// app_dict is a borrowed reference from PyModule_GetDict and must not be
+	// decref'd. The lookup result is borrowed too, so take our own reference.
 	if app_func == nil {
 		ExitProcessInvalid("Couldn't find 'application' entrypoint in module")
 	}
+	C.Py_IncRef(app_func)
 
 	start_response_def.ml_name = C.CString("start_response")
 	start_response_def.ml_meth = C.PyCFunction(C.py_wsgi_start_response)

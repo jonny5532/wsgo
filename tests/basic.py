@@ -413,3 +413,16 @@ class BasicTests(WsgoTestCase):
         self.assertEqual(requests.get('http://localhost:8000/close-raise/').status_code, 200)
 
         self.assertEqual(requests.get('http://localhost:8000/errored/').text, 'no')
+
+    def test_module_dict_reference_not_over_released(self):
+        """
+        PyModule_GetDict returns a borrowed reference and must not be
+        decref'd. Compare this module's dictionary refcount with an
+        equivalent dynamically-created module.
+        """
+
+        self.start('--module', 'refcount_module', '--process', '1', '--workers', '1')
+
+        r = requests.get('http://localhost:8000/')
+        ours, theirs = [int(v) for v in r.text.split(',')]
+        self.assertEqual(ours, theirs, "module dict refcount was over-released")
