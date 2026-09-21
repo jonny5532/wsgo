@@ -2,6 +2,7 @@ package wsgo
 
 import (
 	"log"
+	"sync"
 	"time"
 )
 
@@ -26,14 +27,28 @@ type Cron struct {
 	wday int
 }
 
-var crons []Cron
-var cronAdded chan bool
+var (
+	crons      []Cron
+	cronsMutex sync.Mutex
+	cronAdded  chan bool
+)
 
 func init() {
 	cronAdded = make(chan bool, 1)
 }
 
 func AddCron(function *C.PyObject, period int, min int, hour int, day int, mon int, wday int) {
+	str := C.PyObject_Str(function)
+	name := C.GoString(C.PyUnicode_AsUTF8(str))
+	C.Py_DecRef(str)
+
+	addCron(function, name, period, min, hour, day, mon, wday)
+}
+
+// addCron registers a cron job. Access to the crons slice is serialised with
+// cronsMutex, since applications may call wsgo.add_cron at runtime while
+// CronRoutine is running.
+func addCron(function *C.PyObject, name string, period int, min int, hour int, day int, mon int, wday int) {
 	cron := Cron{
 		period:   time.Duration(period) * time.Second,
 		min:      min,
@@ -44,13 +59,13 @@ func AddCron(function *C.PyObject, period int, min int, hour int, day int, mon i
 		function: function,
 	}
 
-	str := C.PyObject_Str(function)
-	cron.name = C.GoString(C.PyUnicode_AsUTF8(str))
-	C.Py_DecRef(str)
-
+	cron.name = name
 	cron.nextRun = cron.calculateNextRun()
 	log.Println("Added cron job", cron.name, "with next run at", cron.nextRun)
+
+	cronsMutex.Lock()
 	crons = append(crons, cron)
+	cronsMutex.Unlock()
 
 	// nonblocking send
 	select {
@@ -86,6 +101,9 @@ func CronRoutine() {
 }
 
 func DurationUntilNextCron() time.Duration {
+	cronsMutex.Lock()
+	defer cronsMutex.Unlock()
+
 	if len(crons) == 0 {
 		// wake up every 60s incase we missed a newly created job somehow
 		return 60 * time.Second
@@ -106,13 +124,22 @@ func DurationUntilNextCron() time.Duration {
 }
 
 func CronTick() {
+	var due []*BackgroundJob
+
+	cronsMutex.Lock()
 	now := time.Now()
 	for i, cron := range crons {
 		if now.After(cron.nextRun) {
-			// Unbuffered channel, so cron will block
-			backgroundJobs <- &BackgroundJob{function: cron.function}
-			crons[i].nextRun = crons[i].calculateNextRun()
+			due = append(due, &BackgroundJob{function: cron.function})
+			crons[i].nextRun = cron.calculateNextRun()
 		}
+	}
+	cronsMutex.Unlock()
+
+	// Send outside the lock: backgroundJobs is unbuffered, so a send blocks
+	// until the background worker picks the job up.
+	for _, job := range due {
+		backgroundJobs <- job
 	}
 }
 
@@ -137,26 +164,26 @@ func (cron *Cron) calculateNextRun() time.Time {
 	if false {
 		// for testing
 		now = time.Date(
-			now.Year(), 
+			now.Year(),
 			now.Month(),
 			now.Day(),
-			7, 
-			21, 
+			7,
+			21,
 			0, 0, now.Location(),
 		)
 	}
-	
+
 	// Calculate the 'nextRun' based on the current time, replacing any of
 	// the time segments with those specified in the cron rule. The resulting
 	// time may be in the future (fine), but it may also be in the past, in
 	// which case it will need advancing.
 
 	nextRun := time.Date(
-		now.Year(), 
+		now.Year(),
 		time.Month(Iif(cron.mon > -1, cron.mon, int(now.Month()))),
 		Iif(cron.day > -1, cron.day, now.Day()),
-		Iif(cron.hour > -1, cron.hour, now.Hour()), 
-		Iif(cron.min > -1, cron.min, now.Minute()), 
+		Iif(cron.hour > -1, cron.hour, now.Hour()),
+		Iif(cron.min > -1, cron.min, now.Minute()),
 		0, 0, now.Location(),
 	)
 
@@ -177,8 +204,8 @@ func (cron *Cron) calculateNextRun() time.Time {
 	if !nextRun.After(now) && cron.hour == -1 {
 		// try the next hour
 		v := now.Hour() + 1
-		nextRun = time.Date(nextRun.Year(), nextRun.Month(), nextRun.Day(), 
-			v%24, 
+		nextRun = time.Date(nextRun.Year(), nextRun.Month(), nextRun.Day(),
+			v%24,
 			Iif(cron.min > -1, cron.min, 0), // use minute if specified, else the start of the next hour
 			0, 0, now.Location(),
 		)
@@ -198,11 +225,11 @@ func (cron *Cron) calculateNextRun() time.Time {
 		if n.Day() > 1 || cron.mon == -1 {
 			// either month didn't change, or wasn't pinned
 			nextRun = n
-			nextRun = time.Date(nextRun.Year(), 
-				time.Month(Iif(cron.mon > -1, cron.mon, int(nextRun.Month()))), 
-				nextRun.Day(), 
-				Iif(cron.hour > -1, cron.hour, 0),  // use hour if specified, else the start of the next day
-				Iif(cron.min > -1, cron.min, 0), // use minute if specified, else the start of the next hour
+			nextRun = time.Date(nextRun.Year(),
+				time.Month(Iif(cron.mon > -1, cron.mon, int(nextRun.Month()))),
+				nextRun.Day(),
+				Iif(cron.hour > -1, cron.hour, 0), // use hour if specified, else the start of the next day
+				Iif(cron.min > -1, cron.min, 0),   // use minute if specified, else the start of the next hour
 				0, 0, now.Location(),
 			)
 		}
@@ -211,10 +238,10 @@ func (cron *Cron) calculateNextRun() time.Time {
 	if !nextRun.After(now) && cron.mon == -1 {
 		// try the next month
 		nextRun = nextRun.AddDate(0, 1, 0)
-		nextRun = time.Date(nextRun.Year(), nextRun.Month(), 
-			Iif(cron.day > -1, cron.day, 1),  // use day if specified, else the start of the next month
-			Iif(cron.hour > -1, cron.hour, 0),  // use hour if specified, else the start of the next day
-			Iif(cron.min > -1, cron.min, 0), // use minute if specified, else the start of the next hour
+		nextRun = time.Date(nextRun.Year(), nextRun.Month(),
+			Iif(cron.day > -1, cron.day, 1),   // use day if specified, else the start of the next month
+			Iif(cron.hour > -1, cron.hour, 0), // use hour if specified, else the start of the next day
+			Iif(cron.min > -1, cron.min, 0),   // use minute if specified, else the start of the next hour
 			0, 0, now.Location(),
 		)
 	}
@@ -222,16 +249,16 @@ func (cron *Cron) calculateNextRun() time.Time {
 	if !nextRun.After(now) {
 		// try the next year
 		nextRun = time.Date(
-			nextRun.Year()+1, 
-			time.Month(Iif(cron.mon > -1, cron.mon, 1)), 
-			Iif(cron.day > -1, cron.day, 1),  // use day if specified, else the start of the next month
-			Iif(cron.hour > -1, cron.hour, 0),  // use hour if specified, else the start of the next day
-			Iif(cron.min > -1, cron.min, 0), // use minute if specified, else the start of the next hour
+			nextRun.Year()+1,
+			time.Month(Iif(cron.mon > -1, cron.mon, 1)),
+			Iif(cron.day > -1, cron.day, 1),   // use day if specified, else the start of the next month
+			Iif(cron.hour > -1, cron.hour, 0), // use hour if specified, else the start of the next day
+			Iif(cron.min > -1, cron.min, 0),   // use minute if specified, else the start of the next hour
 			0, 0, now.Location(),
 		)
 	}
 
-    // if a weekday is specified, and nextRun isn't on it (or is in the past)
+	// if a weekday is specified, and nextRun isn't on it (or is in the past)
 
 	if cron.wday != -1 && (cron.wday != int(nextRun.Weekday()) || !nextRun.After(now)) {
 		daysToAdd := cron.wday - int(nextRun.Weekday())
