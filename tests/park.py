@@ -43,3 +43,22 @@ class ParkTests(WsgoTestCase):
 
         self.assertEqual(park_response.result().status_code, 200)
         self.assertEqual(park_response.result().text, 'retry_arg')
+
+    def test_park_retry_cannot_be_reparked(self):
+        """
+        A request that was woken as a retry must not be parked again, even
+        if the application responds with the park headers.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1')
+
+        park_response = self.pool.submit(
+            requests.get, 'http://localhost:8000/park/reretry', timeout=15
+        )
+
+        time.sleep(0.5)
+        requests.get('http://localhost:8000/park/notify_reretry')
+
+        r = park_response.result(timeout=15)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.text, 'retry-complete')

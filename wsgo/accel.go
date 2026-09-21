@@ -5,22 +5,22 @@ import (
 )
 
 func CanAccelResponse(job *RequestJob) bool {
-	if v := job.w.Header().Get("X-Sendfile"); v!="" {
+	if v := job.w.Header().Get("X-Sendfile"); v != "" {
 		job.sendFile = v
 		job.w.Header().Del("X-Sendfile")
 		return true
 	}
-	if v := job.w.Header().Get("X-Accel-Redirect"); v!="" {
+	if v := job.w.Header().Get("X-Accel-Redirect"); v != "" {
 		job.sendFile = v
 		job.w.Header().Del("X-Accel-Redirect")
 		return true
 	}
 
-	if v := job.w.Header().Get("X-WSGo-Park"); v!="" {
-		//job.w.Header().Del("X-WSGo-Retry")
-		// retrying only allowed if we're not already handling a retry
-		if job.req.Header.Get("X-WSGo-Park") == "" {
-		 	job.parkedId = v
+	if v := job.w.Header().Get("X-WSGo-Park"); v != "" {
+		// Retries are never allowed to park again, otherwise a request could
+		// loop forever if the application keeps returning park headers.
+		if !job.isRetry {
+			job.parkedId = v
 			return true
 		}
 	}

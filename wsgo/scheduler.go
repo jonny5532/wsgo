@@ -34,6 +34,10 @@ type RequestJob struct {
 	sendFile string
 
 	parkedId string
+
+	// Whether this job is a retry of a parked request. Retries must not be
+	// parked again, otherwise they could loop forever.
+	isRetry bool
 }
 
 type RequestCount struct {

@@ -159,10 +159,11 @@ func ParkJob(job *RequestJob) {
 	cw := NewNonCachingCacheWriter(job.w.writer)
 
 	newJob := &RequestJob{
-		w:    cw,
-		req:  job.req,
-		r:    requestReader,
-		done: make(chan bool, 1),
+		w:       cw,
+		req:     job.req,
+		r:       requestReader,
+		done:    make(chan bool, 1),
+		isRetry: true,
 	}
 	scheduler.HandleJob(newJob, time.Duration(requestTimeout)*time.Second)
 

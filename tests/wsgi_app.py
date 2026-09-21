@@ -201,6 +201,23 @@ def park_testing(environ, start_response):
         ])
         return [b"notified!"]
 
+    if environ['PATH_INFO'] == '/park/reretry':
+        # Ask to be parked again, even on a retry. wsgo must ignore the park
+        # header on a retry, otherwise the request loops forever.
+        start_response('200 OK', [
+            ('Content-Type', 'text/html'),
+            ('X-WSGo-Park', 'reretry'),
+            ('X-WSGo-Park-Timeout', '5 http-504'),
+        ])
+        if 'HTTP_X_WSGO_PARK_ARG' in environ:
+            return [b'retry-complete']
+        return [b'first-pass']
+
+    if environ['PATH_INFO'] == '/park/notify_reretry':
+        wsgo.notify_parked("reretry", wsgo.RETRY, "some-arg")
+        start_response('200 OK', [('Content-Type', 'text/html')])
+        return [b'notified']
+
     if environ['PATH_INFO'] == '/park/notify_wrong':
         wsgo.notify_parked("555", wsgo.HTTP_504, "")
         start_response('200 OK', [
