@@ -181,6 +181,11 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 		shutdownTimedOut = true
 	}
 
+	// Stop the worker goroutines (and their Python thread states) before
+	// finalizing the interpreter; Py_Finalize must not run while workers are
+	// still alive.
+	StopWorkers()
+
 	// Now try to shut down the Python interpreter.
 
 	finalized := make(chan bool, 0)
@@ -189,9 +194,11 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 		case <-finalized:
 			// Finalized succesfully.
 		case <-time.After(15 * time.Second):
-			// Py_Finalize probably won't return, so just exit.
+			// Py_Finalize probably won't return. Exit uncleanly so the
+			// process manager restarts us rather than treating this as a
+			// successful shutdown.
 			log.Println("Process", process, "finalize timed out, exiting.")
-			os.Exit(0)
+			os.Exit(1)
 		}
 	}()
 

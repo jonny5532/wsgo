@@ -86,10 +86,42 @@ func GetRequestTimeoutException() *C.PyObject {
 	return exc
 }
 
+var (
+	// workerStop is closed by StopWorkers to tell worker goroutines to exit.
+	workerStop       = make(chan struct{})
+	workerStopClosed atomic.Bool
+	workersWg        sync.WaitGroup
+)
+
+// StopWorkers signals the worker goroutines to exit and waits for them (with
+// a short timeout) so that Py_Finalize is not run while worker Python thread
+// states are still alive.
+func StopWorkers() bool {
+	if workerStopClosed.CompareAndSwap(false, true) {
+		close(workerStop)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		workersWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(5 * time.Second):
+		log.Println("Workers didn't stop in time.")
+		return false
+	}
+}
+
 func StartWorkers() {
 	workers = make([]*PythonWorker, totalWorkers)
 
 	log.Println("Process", strconv.Itoa(process), "starting", strconv.Itoa(totalWorkers), "workers.")
+
+	workersWg.Add(totalWorkers + 1)
 
 	for i := 0; i < totalWorkers; i++ {
 		workers[i] = &PythonWorker{
@@ -202,6 +234,7 @@ func (worker *PythonWorker) Run() {
 	// It is important that this goroutine always uses the same OS thread, else
 	// the Python GIL will get very upset.
 	runtime.LockOSThread()
+	defer workersWg.Done()
 
 	// Pin all the threads to the same CPU, which should reduce the 'convoy problem' caused by the GIL
 	var cpuSet unix.CPUSet
@@ -213,6 +246,10 @@ func (worker *PythonWorker) Run() {
 
 	for {
 		job := scheduler.GrabJob()
+		if job == nil {
+			// Shutdown has been requested.
+			return
+		}
 
 		job.worker = worker.number
 
@@ -226,6 +263,7 @@ func (worker *PythonWorker) Run() {
 
 func (worker *PythonWorker) BackgroundWorkerRun() {
 	runtime.LockOSThread()
+	defer workersWg.Done()
 
 	// Pin all the threads to the same CPU, which should reduce the 'convoy problem' caused by the GIL
 	var cpuSet unix.CPUSet
@@ -236,7 +274,13 @@ func (worker *PythonWorker) BackgroundWorkerRun() {
 	unix.SchedSetaffinity(0, &cpuSet)
 
 	for {
-		backgroundJob := <-backgroundJobs
+		var backgroundJob *BackgroundJob
+		select {
+		case <-workerStop:
+			return
+		case backgroundJob = <-backgroundJobs:
+		}
+
 		backgroundJobActive.Lock()
 
 		worker.RunPythonTask(func() {

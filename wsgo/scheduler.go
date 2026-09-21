@@ -259,6 +259,13 @@ func (sched *Scheduler) grabQueuedJob() *RequestJob {
 
 func (sched *Scheduler) GrabJob() *RequestJob {
 	for {
+		// Exit promptly if shutdown has been requested.
+		select {
+		case <-workerStop:
+			return nil
+		default:
+		}
+
 		// Try and grab a waiting job
 		job := sched.grabQueuedJob()
 		if job != nil {
@@ -290,6 +297,8 @@ func (sched *Scheduler) GrabJob() *RequestJob {
 		select {
 		case <-sched.jobsWaiting:
 			// woke up for a waiting job
+		case <-workerStop:
+			return nil
 		case <-time.After(time.Duration(rand.Intn(400)+800) * time.Millisecond):
 			// woke up after timeout (to avoid potential deadlocks)
 		}
