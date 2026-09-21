@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"strconv"
 	"sync"
-    "syscall"
+	"syscall"
 	"time"
 )
 
@@ -17,7 +17,20 @@ var processManagerStopping bool = false
 var processCommands []*exec.Cmd
 var processCommandsMutex sync.Mutex
 
+func removeProcessCommand(cmd *exec.Cmd) {
+	processCommandsMutex.Lock()
+	defer processCommandsMutex.Unlock()
+	for i, c := range processCommands {
+		if c == cmd {
+			processCommands = append(processCommands[:i], processCommands[i+1:]...)
+			break
+		}
+	}
+}
+
 func RunProcess(wg *sync.WaitGroup, process int) {
+	defer wg.Done()
+
 	for {
 		args := append(os.Args[1:], "--process", strconv.Itoa(process))
 		cmd := exec.Command(os.Args[0], args...)
@@ -42,8 +55,16 @@ func RunProcess(wg *sync.WaitGroup, process int) {
 			log.Println("Process", process, "not started.")
 			break
 		}
-		
-		cmd.Run()
+
+		err := cmd.Run()
+
+		if cmd.ProcessState == nil {
+			// The process never started, so there is no state to inspect
+			// and no Process to signal. Retrying can't help.
+			log.Println("Process", process, "could not be executed:", err)
+			removeProcessCommand(cmd)
+			break
+		}
 
 		if cmd.ProcessState.Success() {
 			log.Println("Process", process, "has finished.")
@@ -55,7 +76,6 @@ func RunProcess(wg *sync.WaitGroup, process int) {
 		log.Println("Process", process, "exited uncleanly, restarting.")
 		time.Sleep(100 * time.Millisecond)
 	}
-	wg.Done()
 }
 
 func RunProcessManager() {
@@ -69,15 +89,17 @@ func RunProcessManager() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-        <- sigs
+		<-sigs
 		processCommandsMutex.Lock()
 		processManagerStopping = true
 		defer processCommandsMutex.Unlock()
 
 		for _, cmd := range processCommands {
-			cmd.Process.Signal(syscall.SIGTERM)
+			if cmd.Process != nil {
+				cmd.Process.Signal(syscall.SIGTERM)
+			}
 		}
-    }()
+	}()
 
 	wg.Wait()
 }
