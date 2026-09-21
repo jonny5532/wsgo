@@ -18,6 +18,8 @@ close_count = 0
 
 logger = logging.getLogger('test_logger')
 
+accel_close_count = 0
+
 def _fill_stderr():
     # Fill the server's stderr pipe so that a Go log call blocks until the
     # test drains it.
@@ -100,6 +102,19 @@ def application(environ, start_response):
         threading.Thread(target=late_read, args=(environ,), daemon=True).start()
         start_response('200 OK', [('Content-Type','text/plain')])
         return [b'started']
+
+    if environ['PATH_INFO'] == '/accel-close/sendfile':
+        start_response('200 OK', [('X-Sendfile', './wsgi_app.py')])
+        return AccelCloseResponse()
+    if environ['PATH_INFO'] == '/accel-close/park':
+        start_response('200 OK', [
+            ('X-WSGo-Park', 'close-channel'),
+            ('X-WSGo-Park-Timeout', '1 http-204'),
+        ])
+        return AccelCloseResponse()
+    if environ['PATH_INFO'] == '/accel-close/count':
+        start_response('200 OK', [('Content-Type', 'text/plain')])
+        return [str(accel_close_count).encode('ascii')]
 
     if environ['PATH_INFO'].startswith('/park/'):
         return park_testing(environ, start_response)
@@ -294,6 +309,18 @@ class RaiseCloseResponse:
 
     def close(self):
         raise ValueError('close-boom')
+
+
+class AccelCloseResponse:
+    """Response object whose close() is counted, used to check that
+    X-Sendfile/parked responses are still closed."""
+
+    def __iter__(self):
+        return iter([b'ignored'])
+
+    def close(self):
+        global accel_close_count
+        accel_close_count += 1
 
 
 def badheaders_testing(environ, start_response):

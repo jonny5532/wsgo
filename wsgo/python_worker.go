@@ -21,10 +21,10 @@ import (
 import "C"
 
 type PythonWorker struct {
-	number      int
-	stuck       atomic.Bool
+	number int
+	stuck  atomic.Bool
 	// This gets set once, the first time we run a task on a worker
-	gilState    C.PyGILState_STATE
+	gilState C.PyGILState_STATE
 	// This is used to remember the threadstate between successive tasks
 	threadState *C.PyThreadState
 }
@@ -42,7 +42,7 @@ func AllWorkersAreStuck() bool {
 	return true
 }
 
-func GetRequestTimeoutException() (*C.PyObject) {
+func GetRequestTimeoutException() *C.PyObject {
 	// Returns a new reference.
 
 	mod_name := C.CString("wsgo")
@@ -70,7 +70,7 @@ func StartWorkers() {
 
 	for i := 0; i < totalWorkers; i++ {
 		workers[i] = &PythonWorker{
-			number:        i + 1,
+			number: i + 1,
 		}
 		go workers[i].Run()
 	}
@@ -92,7 +92,6 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 		// PyGILState_Release in each thread just before shutdown. (TODO)
 		worker.gilState = C.PyGILState_Ensure()
 	}
-
 
 	// `finished` is set by the worker once the task has completed, whilst it
 	// still holds the GIL. The timeout goroutine checks it whilst holding the
@@ -224,7 +223,7 @@ func (worker *PythonWorker) BackgroundWorkerRun() {
 				select {
 				case <-finished:
 					return
-				case <-time.After(time.Duration(backgroundTimeout + 10) * time.Second):
+				case <-time.After(time.Duration(backgroundTimeout+10) * time.Second):
 					log.Fatalln("Background worker permanently stuck, quitting!")
 				}
 			}()
@@ -280,7 +279,11 @@ func (worker *PythonWorker) HandleJob(job *RequestJob) {
 
 	if CanAccelResponse(job) {
 		// Is X-Sendfile or similar - the response will be done later, based
-		// on the headers alone.
+		// on the headers alone. The application's response body isn't used,
+		// but WSGI still requires .close() to be called on it.
+		if closeWsgiResponse(ret) != nil {
+			errorCount.Add(1)
+		}
 		return
 	}
 

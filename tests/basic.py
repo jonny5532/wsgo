@@ -466,3 +466,19 @@ class BasicTests(WsgoTestCase):
 
         # The process must still be alive and serving requests.
         self.assertEqual(requests.get('http://localhost:8000/').status_code, 200)
+
+    def test_accel_response_is_closed(self):
+        """
+        X-Sendfile and parked responses don't stream the application's body,
+        but the response iterable must still have .close() called on it.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1')
+
+        # X-Sendfile
+        self.assertEqual(requests.get('http://localhost:8000/accel-close/sendfile').status_code, 200)
+        self.assertEqual(requests.get('http://localhost:8000/accel-close/count').text, '1')
+
+        # Parked (times out with a 204 after one second)
+        self.assertEqual(requests.get('http://localhost:8000/accel-close/park', timeout=10).status_code, 204)
+        self.assertEqual(requests.get('http://localhost:8000/accel-close/count').text, '2')
