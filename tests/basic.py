@@ -355,3 +355,25 @@ class BasicTests(WsgoTestCase):
         # The process must still be alive and serving requests.
         r = requests.get('http://localhost:8000/')
         self.assertEqual(r.status_code, 200)
+
+    def test_cache_refreshes_before_expiry(self):
+        """
+        Once a cached response is within half of --max-age, an incoming
+        request should still be served from cache but trigger a background
+        refresh, so the following request sees fresh content.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1', '--workers', '1', '--max-age', '4')
+
+        t0 = requests.get('http://localhost:8000/time/').text
+
+        # Immediately afterwards this is a plain cache hit with no refresh.
+        self.assertEqual(requests.get('http://localhost:8000/time/').text, t0)
+
+        # Past half of the max-age: still served from cache...
+        time.sleep(2.5)
+        self.assertEqual(requests.get('http://localhost:8000/time/').text, t0)
+
+        # ...but a refresh has been queued, so fresh content appears shortly.
+        time.sleep(0.5)
+        self.assertNotEqual(requests.get('http://localhost:8000/time/').text, t0)

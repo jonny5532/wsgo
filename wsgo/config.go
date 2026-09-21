@@ -32,7 +32,7 @@ func (i *heavyPrefix) Set(value string) error {
 	return nil
 }
 
-var totalWorkers int = 16     //total number of worker threads
+var totalWorkers int = 16 //total number of worker threads
 var processes int = 1
 var process int = 0
 var bindAddress string = ":8000"
@@ -41,6 +41,7 @@ var requestTimeout int = 60
 var backgroundTimeout int = 1800
 var maxQueueLength int = 128
 var requestBufferLength int = 1048576
+
 // response buffering involves an extra copy so often isn't a performance gain
 var responseBufferLength int = 0 //1048576
 var maxAge int = 0
@@ -57,9 +58,12 @@ func ParseFlags() {
 	flag.StringVar(&bindAddress, "http-socket", bindAddress, "server bind address")
 	flag.IntVar(&requestTimeout, "request-timeout", requestTimeout, "request timeout in seconds")
 	flag.IntVar(&maxAge, "max-age", maxAge, "maximum number of seconds to cache responses (0 to disable)")
-	maxAgeBeforeRefetch = maxAge / 2
 	flag.Uint64Var(&pageCacheLimit, "cache-size", pageCacheLimit, "maximum size of page cache in bytes")
 	flag.Var(&staticMap, "static-map", "static file folder mapping")
 	flag.IntVar(&staticMaxAge, "static-max-age", staticMaxAge, "encourage clients to cache static files for this many seconds (0 to disable)")
 	flag.Parse()
+
+	// Must be calculated after flag.Parse() so that a non-default --max-age
+	// enables stale-while-revalidate in TryCache.
+	maxAgeBeforeRefetch = maxAge / 2
 }
