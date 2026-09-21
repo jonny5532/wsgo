@@ -338,3 +338,20 @@ class BasicTests(WsgoTestCase):
         # Check that the URL gets echoed back correctly
         r = requests.get('http://localhost:8000/echo/Božja')
         self.assertEqual(r.text, '/echo/Božja')
+
+    def test_bad_start_response_headers(self):
+        """
+        Malformed start_response() headers (non-string values, wrong tuple
+        length, or an excessive number of headers) must be rejected without
+        crashing the worker process.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1')
+
+        for path in ['/badheaders/nonstring', '/badheaders/longtuple', '/badheaders/many']:
+            r = requests.get('http://localhost:8000' + path, timeout=15)
+            self.assertEqual(r.status_code, 502, 'expected 502 for ' + path)
+
+        # The process must still be alive and serving requests.
+        r = requests.get('http://localhost:8000/')
+        self.assertEqual(r.status_code, 200)

@@ -67,6 +67,8 @@ def application(environ, start_response):
         return park_testing(environ, start_response)
     if environ['PATH_INFO'].startswith('/block/'):
         return block_testing(environ, start_response)
+    if environ['PATH_INFO'].startswith('/badheaders/'):
+        return badheaders_testing(environ, start_response)
 
     h = hashlib.md5()
     if environ['REQUEST_METHOD']=='POST':
@@ -185,6 +187,20 @@ def park_testing(environ, start_response):
             ('Content-Type','text/html'),
         ])
         return [b"notified!"]
+
+def badheaders_testing(environ, start_response):
+    """Routes that exercise malformed start_response() arguments. wsgo must
+    reject these without crashing the worker process."""
+    path = environ['PATH_INFO']
+    if path == '/badheaders/nonstring':
+        start_response('200 OK', [('Content-Type', 123)])
+    elif path == '/badheaders/longtuple':
+        start_response('200 OK', [('Content-Type', 'text/plain', 'extra')])
+    elif path == '/badheaders/many':
+        # Large enough to overflow a C stack VLA in the unfixed version.
+        start_response('200 OK', [('X-%d' % i, 'v') for i in range(500000)])
+    return [b'ignored']
+
 
 def block_testing(environ, start_response):
     start_response('200 OK', [

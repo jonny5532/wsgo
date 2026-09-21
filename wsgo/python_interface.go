@@ -27,69 +27,116 @@ extern PyObject *go_wsgi_read_request_line(long request_id);
 extern void go_add_cron(PyObject *func, long period, long min, long hour, long day, long mon, long wday);
 extern void go_notify_parked(const char* parked_id, int parked_id_len, int action, const char* param, int param_len);
 
+// Upper bound on the number of response headers accepted from an
+// application. Protects against unbounded allocations/stack use when an
+// application (or a library it uses) builds headers from untrusted input.
+#define WSGO_MAX_RESPONSE_HEADERS 1024
 
+// Sends the status line and headers to the Go side. Returns Py_None on
+// success, or NULL with a Python exception set if the arguments are not
+// valid WSGI (status string plus a list of 2-tuples of strings).
 // _PyCFunctionFast signature
 PyObject *py_wsgi_start_response(PyObject *self, PyObject **args, Py_ssize_t nargs) {
-	if(nargs==2) {
-		Py_ssize_t status_len;
-		const char *status = PyUnicode_AsUTF8AndSize(args[0], &status_len); // don't need to free
-
-		if(status==0) {
-			PyErr_Print();
-			Py_IncRef(Py_None);
-			return Py_None;
-		}
-
-		long request_id = PyLong_AsLong(self);
-
-		int headers_size = PyList_Size(args[1]);
-		if(headers_size<0) {
-			PyErr_Print();
-			Py_IncRef(Py_None);
-			return Py_None;
-		}
-
-		const char* header_parts[headers_size*2];
-		int header_part_lengths[headers_size*2];
-
-		for(int i=0; i<headers_size; i++) {
-			PyObject *tup = PyList_GetItem(args[1], i);
-			if(tup==NULL) {
-				PyErr_Print();
-				Py_IncRef(Py_None);
-				return Py_None;
-			}
-
-			int tup_size = PyTuple_Size(tup);
-			if(tup_size<0) {
-				PyErr_Print();
-				Py_IncRef(Py_None);
-				return Py_None;
-			}
-
-			if(tup_size!=2) {
-				Py_IncRef(Py_None);
-				return Py_None;
-			}
-
-			Py_ssize_t key_len;
-			const char *key = PyUnicode_AsUTF8AndSize(PyTuple_GetItem(tup, 0), &key_len);
-
-			Py_ssize_t val_len;
-			const char *val = PyUnicode_AsUTF8AndSize(PyTuple_GetItem(tup, 1), &val_len);
-
-			header_parts[i*2] = (char*)key;
-			header_part_lengths[i*2] = (int)key_len;
-
-			header_parts[1 + i*2] = (char*)val;
-			header_part_lengths[1 + i*2] = (int)val_len;
-		}
-
-		go_wsgi_start_response(request_id, status, (int)status_len, header_parts, header_part_lengths, headers_size);
+	if(nargs!=2) {
+		PyErr_SetString(PyExc_TypeError, "start_response() takes exactly 2 arguments");
+		return NULL;
 	}
+
+	Py_ssize_t status_len;
+	const char *status = PyUnicode_AsUTF8AndSize(args[0], &status_len); // don't need to free
+	if(status==NULL) {
+		// Exception set by PyUnicode_AsUTF8AndSize
+		return NULL;
+	}
+	if(status_len > 1024) {
+		PyErr_SetString(PyExc_ValueError, "start_response() status line too long");
+		return NULL;
+	}
+
+	long request_id = PyLong_AsLong(self);
+	if(request_id==-1 && PyErr_Occurred()) {
+		return NULL;
+	}
+
+	if(!PyList_Check(args[1])) {
+		PyErr_SetString(PyExc_TypeError, "start_response() headers must be a list");
+		return NULL;
+	}
+
+	Py_ssize_t headers_size = PyList_Size(args[1]);
+	if(headers_size<0) {
+		// Exception set by PyList_Size
+		return NULL;
+	}
+	if(headers_size > WSGO_MAX_RESPONSE_HEADERS) {
+		PyErr_SetString(PyExc_ValueError, "start_response() received too many headers");
+		return NULL;
+	}
+
+	size_t parts_count = (size_t)headers_size * 2;
+	const char **header_parts = PyMem_Malloc(parts_count * sizeof(char*));
+	int *header_part_lengths = PyMem_Malloc(parts_count * sizeof(int));
+	if(header_parts==NULL || header_part_lengths==NULL) {
+		PyMem_Free(header_parts);
+		PyMem_Free(header_part_lengths);
+		PyErr_NoMemory();
+		return NULL;
+	}
+
+	for(Py_ssize_t i=0; i<headers_size; i++) {
+		// Pre-zero the slots so a failure part-way through can never leave
+		// uninitialised data to be passed to Go.
+		header_parts[i*2] = NULL;
+		header_part_lengths[i*2] = 0;
+		header_parts[1 + i*2] = NULL;
+		header_part_lengths[1 + i*2] = 0;
+
+		PyObject *tup = PyList_GetItem(args[1], i);
+		if(tup==NULL) {
+			goto error;
+		}
+		if(!PyTuple_Check(tup) || PyTuple_Size(tup)!=2) {
+			PyErr_SetString(PyExc_TypeError, "each response header must be a (name, value) 2-tuple");
+			goto error;
+		}
+
+		PyObject *key_obj = PyTuple_GetItem(tup, 0);
+		PyObject *val_obj = PyTuple_GetItem(tup, 1);
+		if(key_obj==NULL || val_obj==NULL) {
+			goto error;
+		}
+
+		Py_ssize_t key_len = 0;
+		const char *key = PyUnicode_AsUTF8AndSize(key_obj, &key_len);
+		if(key==NULL) {
+			goto error;
+		}
+
+		Py_ssize_t val_len = 0;
+		const char *val = PyUnicode_AsUTF8AndSize(val_obj, &val_len);
+		if(val==NULL) {
+			goto error;
+		}
+
+		header_parts[i*2] = key;
+		header_part_lengths[i*2] = (int)key_len;
+
+		header_parts[1 + i*2] = val;
+		header_part_lengths[1 + i*2] = (int)val_len;
+	}
+
+	go_wsgi_start_response(request_id, status, (int)status_len, header_parts, header_part_lengths, (int)headers_size);
+
+	PyMem_Free(header_parts);
+	PyMem_Free(header_part_lengths);
 
 	Py_IncRef(Py_None);
 	return Py_None;
+
+error:
+	PyMem_Free(header_parts);
+	PyMem_Free(header_part_lengths);
+	return NULL;
 }
 
 typedef struct wsgo_WsgiInput {
@@ -509,5 +556,5 @@ func PyEval(code string) (*C.PyObject, func()) {
 }
 
 func GetThreadCpuTime() uint64 {
-	return uint64(C.get_thread_cpu_time());
+	return uint64(C.get_thread_cpu_time())
 }
