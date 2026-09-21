@@ -14,6 +14,12 @@ class WsgoTestCase(unittest.TestCase):
         if self.process:
             self.process.terminate()
             self.process.wait()
+            for stream in (self.process.stdout, self.process.stderr):
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
 
     def start(self, *args, env=None, drain=True):
         proc_env = os.environ.copy()
