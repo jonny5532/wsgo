@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -42,6 +42,7 @@ type PageCacheEntry struct {
 	vary        map[string]*string
 	varyCookies string
 	expiry      time.Time
+	lastUsed    time.Time
 	hits        uint64
 }
 
@@ -69,59 +70,69 @@ func DeriveCacheKey(req *http.Request) string {
 	return req.Method + " " + req.Host + req.URL.Path + "?" + req.URL.RawQuery
 }
 
+func (entry *PageCacheEntry) variesFrom(req *http.Request) bool {
+	for k, v := range entry.vary {
+		req_val := req.Header.Get(k)
+		if k == "Cookie" {
+			// strip out irrelevant cookies
+			req_val = ExtractCookies(req_val, entry.varyCookies)
+		}
+
+		if req_val != *v {
+			return true
+		}
+	}
+	return false
+}
+
 func TryCache(w http.ResponseWriter, req *http.Request) TryCacheResponse {
 	cacheKey := DeriveCacheKey(req)
 	now := time.Now()
 
+	// The entry must be selected (and lastUsed/hits updated) whilst the lock
+	// is held, otherwise a concurrent CachePage can replace the slot while we
+	// are reading it. The fields needed to write the response are copied out
+	// so the lock can be released before writing to the client.
 	pageCacheMutex.Lock()
-	entries := pageCache[cacheKey]
+	var found *PageCacheEntry
+	for _, cached := range pageCache[cacheKey] {
+		if cached.statusCode <= 0 || now.After(cached.expiry) {
+			continue
+		}
+		if cached.variesFrom(req) {
+			// varies on a Vary header so can't use this cache
+			continue
+		}
+		found = cached
+		break
+	}
+	if found == nil {
+		pageCacheMutex.Unlock()
+		return MISS
+	}
+
+	found.hits++
+	found.lastUsed = now
+
+	statusCode := found.statusCode
+	header := found.header
+	buf := found.buf
+	expiringSoon := found.expiry.Sub(now) < (time.Duration(maxAgeBeforeRefetch) * time.Second)
 	pageCacheMutex.Unlock()
 
-	for _, cached := range entries {
-		if cached.statusCode > 0 {
-			// cache entry is valid
-
-			if now.After(cached.expiry) {
-				// has expired
-				continue
-			}
-
-			varies := false
-			for k, v := range cached.vary {
-				req_val := req.Header.Get(k)
-				if k == "Cookie" {
-					// strip out irrelevant cookies
-					req_val = ExtractCookies(req_val, cached.varyCookies)
-				}
-
-				if req_val != *v {
-					varies = true
-					break
-				}
-			}
-			if varies {
-				// varies on a Vary header so can't use this cache
-				continue
-			}
-
-			for k, vv := range cached.header {
-				for _, v := range vv {
-					w.Header().Add(k, v)
-				}
-			}
-			w.WriteHeader(cached.statusCode)
-			w.Write(cached.buf)
-
-			atomic.AddUint64(&cached.hits, 1)
-
-			if cached.expiry.Sub(now) < (time.Duration(maxAgeBeforeRefetch) * time.Second) {
-				return HIT_BUT_EXPIRING_SOON
-			}
-
-			return HIT
+	for k, vv := range header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
 		}
 	}
-	return MISS
+	w.WriteHeader(statusCode)
+	w.Write(buf)
+
+	if expiringSoon {
+		return HIT_BUT_EXPIRING_SOON
+	}
+
+	return HIT
 }
 
 func ExtractCookies(cookies string, filter string) string {
@@ -221,22 +232,20 @@ func CachePage(cw *CacheWriter, req *http.Request) {
 		vary:        varies,
 		varyCookies: varyCookies,
 		expiry:      time.Now().Add(time.Second * time.Duration(lifetimeSeconds)),
+		lastUsed:    time.Now(),
 	}
 
 	if entry.Size() > pageCacheLimit {
 		return
 	}
 
-	if pageCacheSize > pageCacheLimit { //64mb
-		PruneCache()
-	}
+	pageCacheMutex.Lock()
 
 	reusing_slot := false
-	pageCacheMutex.Lock()
 	entries := pageCache[cacheKey]
 	for i, existing := range entries {
 		if reflect.DeepEqual(existing.vary, entry.vary) && existing.varyCookies == entry.varyCookies {
-			pageCacheSize += -entries[i].Size() + entry.Size()
+			pageCacheSize -= entries[i].Size()
 			entries[i] = entry
 			reusing_slot = true
 			break
@@ -244,9 +253,14 @@ func CachePage(cw *CacheWriter, req *http.Request) {
 	}
 
 	if !reusing_slot {
-		pageCache[cacheKey] = append(pageCache[cacheKey], entry)
-		pageCacheSize += entry.Size()
+		pageCache[cacheKey] = append(entries, entry)
 	}
+	pageCacheSize += entry.Size()
+
+	if pageCacheSize > pageCacheLimit {
+		pruneCacheLocked()
+	}
+
 	pageCacheMutex.Unlock()
 }
 
@@ -255,41 +269,66 @@ func (entry *PageCacheEntry) Size() uint64 {
 	return 1000 + uint64(len(entry.buf))
 }
 
-func PruneCache() {
-	pageCacheMutex.Lock()
+// pruneCacheLocked drops expired and never-served entries, and then evicts the
+// least recently used entries until the cache is back under its limit.
+// pageCacheMutex must be held.
+func pruneCacheLocked() {
 	// todo, make this not lock the map for the entire time
 	fmt.Println("Pruning page cache, current size", pageCacheSize)
 
 	now := time.Now()
-	keepCache := func(entry *PageCacheEntry) bool {
-		return entry.hits > 0 && entry.expiry.After(now)
+
+	type cacheEntry struct {
+		key   string
+		entry *PageCacheEntry
 	}
+	var all []cacheEntry
 
 	for k, entries := range pageCache {
-		skip := true
+		kept := entries[:0]
 		for _, entry := range entries {
-			if !keepCache(entry) {
-				skip = false
+			if entry.expiry.After(now) {
+				kept = append(kept, entry)
+				all = append(all, cacheEntry{k, entry})
+			} else {
+				pageCacheSize -= entry.Size()
 			}
 		}
-		if skip {
-			continue
+		if len(kept) == 0 {
+			delete(pageCache, k)
+		} else {
+			pageCache[k] = kept
+		}
+	}
+
+	if pageCacheSize > pageCacheLimit {
+		// Evict least recently used entries, leaving some headroom so that
+		// pruning doesn't have to run on every subsequent insertion.
+		target := pageCacheLimit - pageCacheLimit/10
+
+		sort.Slice(all, func(i, j int) bool {
+			return all[i].entry.lastUsed.After(all[j].entry.lastUsed)
+		})
+
+		for pageCacheSize > target && len(all) > 0 {
+			oldest := all[len(all)-1]
+			pageCacheSize -= oldest.entry.Size()
+			all = all[:len(all)-1]
 		}
 
-		var sizeChange uint64
-		var newEntries []*PageCacheEntry
-		for _, entry := range entries {
-			if keepCache(entry) {
-				sizeChange += entry.Size()
-				newEntries = append(newEntries, entry)
-			} else {
-				sizeChange -= entry.Size()
-			}
+		pageCache = make(map[string][]*PageCacheEntry)
+		for _, item := range all {
+			pageCache[item.key] = append(pageCache[item.key], item.entry)
 		}
-		// overwrite entire entry slice
-		pageCache[k] = newEntries
-		pageCacheSize += sizeChange
 	}
+
 	fmt.Println("Page cache size now", pageCacheSize)
+}
+
+// PruneCache immediately removes expired and unused entries. The cache is
+// also pruned automatically whenever it grows beyond its configured size.
+func PruneCache() {
+	pageCacheMutex.Lock()
+	pruneCacheLocked()
 	pageCacheMutex.Unlock()
 }

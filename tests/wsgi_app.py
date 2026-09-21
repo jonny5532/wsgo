@@ -38,6 +38,14 @@ def application(environ, start_response):
         start_response('200 OK', [('Content-Type','text/plain')])
         return [b'FAST-OK']
 
+    if environ['PATH_INFO']=='/biguid/':
+        start_response('200 OK', [
+            ('Content-Type','text/plain'),
+            ('Cache-Control','max-age=3600'),
+        ])
+        body = (environ['QUERY_STRING'] + ' ' + str(time.time())).encode('ascii')
+        return [body + b'A' * 10000]
+
     if environ['PATH_INFO']=='/none/':
         # A common application bug: call start_response() but return None
         # instead of an iterable.

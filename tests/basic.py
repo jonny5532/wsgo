@@ -206,6 +206,34 @@ class BasicTests(WsgoTestCase):
             self.assertEqual(
                 requests.get('http://localhost:8000/fast/').text, 'FAST-OK')
 
+    def test_page_cache_respects_size_limit(self):
+        """
+        Once the page cache exceeds --cache-size, its least recently used
+        entries must be evicted. Otherwise an attacker can fill it with
+        unique cacheable URLs indefinitely.
+        """
+
+        self.start('--module', 'wsgi_app', '--process', '1',
+                   '--max-age', '3600', '--cache-size', '100000')
+
+        url = 'http://localhost:8000/biguid/?id=0'
+        first = requests.get(url).text
+        time.sleep(0.01)
+        self.assertEqual(requests.get(url).text, first)
+
+        # Fill the cache with more unique ~11KB responses than fit in the
+        # 100KB limit. Each is requested twice so that it has been served,
+        # which is what the old pruning logic used to keep entries alive.
+        for i in range(1, 31):
+            u = 'http://localhost:8000/biguid/?id=%d' % i
+            requests.get(u)
+            time.sleep(0.01)
+            requests.get(u)
+
+        # The first entry must have been evicted by now.
+        time.sleep(0.01)
+        self.assertNotEqual(requests.get(url).text, first)
+
     def test_atexit(self):
         self.start('--module', 'wsgi_app', '--process', '1')
         time.sleep(0.5)
