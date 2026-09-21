@@ -20,8 +20,8 @@ type RequestJob struct {
 	req        *http.Request
 	r          RequestReader
 
-	grabbed    atomic.Bool
-	done       chan bool
+	grabbed atomic.Bool
+	done    chan bool
 
 	// stats used for logging
 	finish     time.Time
@@ -31,9 +31,9 @@ type RequestJob struct {
 	priority   int
 
 	// X-SendFile / X-Accel-Redirect file
-	sendFile   string
+	sendFile string
 
-	parkedId   string
+	parkedId string
 }
 
 type RequestCount struct {
@@ -42,19 +42,20 @@ type RequestCount struct {
 }
 
 type Scheduler struct {
-	jobQueue 		[]*RequestJob
-	jobQueueMutex   sync.Mutex
-	jobsWaiting     chan bool
+	jobQueue      []*RequestJob
+	jobQueueMutex sync.Mutex
+	jobsWaiting   chan bool
 
-	activeRequestsBySource map[string]int
+	activeRequestsBySource      map[string]int
 	activeRequestsBySourceMutex sync.Mutex
 
 	requestsBySource *lru.TwoQueueCache[string, RequestCount]
 
-	activeRequests  atomic.Int32
+	activeRequests atomic.Int32
 }
 
 var scheduler *Scheduler
+
 func init() {
 	scheduler = NewScheduler()
 }
@@ -87,8 +88,14 @@ func (sched *Scheduler) HandleJob(job *RequestJob, timeout time.Duration) error 
 		droppedCount.Add(1)
 		dropJob.done <- true
 	} else {
-		// We added a job to the list, so signal that to any waiting handlers
-		sched.jobsWaiting <- true
+		// We added a job to the list, so signal that to any waiting handlers.
+		// This must be a non-blocking send: if the channel is already full then
+		// there are plenty of wakeups pending, and blocking here would stall
+		// the HTTP handler goroutine (past its request timeout) under load.
+		select {
+		case sched.jobsWaiting <- true:
+		default:
+		}
 	}
 
 	// this is ugly?
@@ -127,7 +134,7 @@ func (sched *Scheduler) HandleJob(job *RequestJob, timeout time.Duration) error 
 	if shouldLog {
 		LogRequestJob(job)
 	}
-	
+
 	return err
 }
 
@@ -181,11 +188,11 @@ func (sched *Scheduler) CalculateJobPriority(job *RequestJob) int {
 		key := GetRateLimitKey(remoteAddrIp)
 
 		sched.activeRequestsBySourceMutex.Lock()
-		priority -= 2000*sched.activeRequestsBySource[key]
+		priority -= 2000 * sched.activeRequestsBySource[key]
 		sched.activeRequestsBySourceMutex.Unlock()
 
 		r := sched.GetAgedRequestCount(key)
-		priority -= int(1000*r.count)
+		priority -= int(1000 * r.count)
 	}
 
 	if job.req.URL.RawQuery != "" {
@@ -201,7 +208,7 @@ func (sched *Scheduler) GetHighestPriorityJob() (*RequestJob, int) {
 	jobIndex := -1
 	for k, j := range sched.jobQueue {
 		j.priority = sched.CalculateJobPriority(j)
-		if (job == nil || j.priority > job.priority) {
+		if job == nil || j.priority > job.priority {
 			job = j
 			jobIndex = k
 		}
@@ -214,7 +221,7 @@ func (sched *Scheduler) GetLowestPriorityJob() (*RequestJob, int) {
 	jobIndex := -1
 	for k, j := range sched.jobQueue {
 		j.priority = sched.CalculateJobPriority(j)
-		if (job == nil || j.priority < job.priority) {
+		if job == nil || j.priority < job.priority {
 			job = j
 			jobIndex = k
 		}
@@ -224,7 +231,7 @@ func (sched *Scheduler) GetLowestPriorityJob() (*RequestJob, int) {
 
 func (sched *Scheduler) FindJobInQueue(job *RequestJob) int {
 	for k, j := range sched.jobQueue {
-		if job==j {
+		if job == j {
 			return k
 		}
 	}
@@ -234,7 +241,7 @@ func (sched *Scheduler) FindJobInQueue(job *RequestJob) int {
 func (sched *Scheduler) grabQueuedJob() *RequestJob {
 	sched.jobQueueMutex.Lock()
 	defer sched.jobQueueMutex.Unlock()
-	if len(sched.jobQueue)>0 {
+	if len(sched.jobQueue) > 0 {
 		job, jobIndex := sched.GetHighestPriorityJob()
 		if job.priority <= -7000 && sched.activeRequests.Load() > 0 {
 			// if we're busy, ignore extremely low priority tasks
@@ -279,7 +286,7 @@ func (sched *Scheduler) GrabJob() *RequestJob {
 		select {
 		case <-sched.jobsWaiting:
 			// woke up for a waiting job
-		case <-time.After(time.Duration(rand.Intn(400) + 800) * time.Millisecond):
+		case <-time.After(time.Duration(rand.Intn(400)+800) * time.Millisecond):
 			// woke up after timeout (to avoid potential deadlocks)
 		}
 	}
@@ -310,8 +317,8 @@ func NewScheduler() *Scheduler {
 	}
 
 	return &Scheduler{
-		jobsWaiting: make(chan bool, maxQueueLength),
+		jobsWaiting:            make(chan bool, maxQueueLength),
 		activeRequestsBySource: make(map[string]int),
-		requestsBySource: requestsBySource,
+		requestsBySource:       requestsBySource,
 	}
 }
