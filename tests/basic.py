@@ -1,6 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
+import glob
+import os
 import requests
 import sys
+import tempfile
 import time
 import unittest
 
@@ -99,6 +102,37 @@ class BasicTests(WsgoTestCase):
 
         # And the GET entry should still be cached afterwards
         self.assertEqual(requests.get('http://localhost:8000/method/').text, 'GET')
+
+    def test_static_does_not_leak_fds(self):
+        """
+        Serving a static file must not leak a file descriptor. http.ServeContent
+        does not close the io.ReadSeeker it is given, so wsgo must close the
+        file itself.
+        """
+
+        with tempfile.TemporaryDirectory() as webroot:
+            with open(os.path.join(webroot, 'file.txt'), 'w') as f:
+                f.write('hello')
+
+            # GOGC=off stops the Go finalizer on os.File from closing the
+            # descriptors, making the leak observable.
+            self.start(
+                '--module', 'wsgi_app', '--process', '1',
+                '--static-map', '/=' + webroot,
+                env={'GOGC': 'off'},
+            )
+
+            for _ in range(50):
+                r = requests.get('http://localhost:8000/file.txt')
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual(r.text, 'hello')
+
+            open_fds = [
+                os.readlink(path)
+                for path in glob.glob('/proc/%d/fd/*' % self.process.pid)
+            ]
+            leaked = [path for path in open_fds if path.endswith('file.txt')]
+            self.assertEqual(leaked, [])
 
     def test_atexit(self):
         self.start('--module', 'wsgi_app', '--process', '1')

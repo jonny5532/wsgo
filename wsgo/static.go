@@ -62,6 +62,7 @@ func TryStatic(w http.ResponseWriter, req *http.Request) bool {
 			if err != nil {
 				continue
 			}
+			defer f.Close()
 
 			w.Header().Add("Expires", time.Now().Add(time.Duration(staticMaxAge)*time.Second).UTC().Format(time.RFC1123))
 			w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(staticMaxAge))

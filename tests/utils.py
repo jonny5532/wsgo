@@ -15,13 +15,17 @@ class WsgoTestCase(unittest.TestCase):
             self.process.terminate()
             self.process.wait()
 
-    def start(self, *args):
+    def start(self, *args, env=None):
+        proc_env = os.environ.copy()
+        if env:
+            proc_env.update(env)
         self.process = subprocess.Popen(
             ['wsgo'] + list(args),
             cwd=os.path.dirname(__file__),
             #start_new_session=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            env=proc_env,
         )
 
         # Pass through process stdout/stderr to system one, which might not be a
