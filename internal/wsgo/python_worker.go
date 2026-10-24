@@ -15,10 +15,6 @@ import (
 
 /*
 #include <Python.h>
-
-// Python <3.7 doesn't include this by default
-#include "pythread.h"
-
 */
 import "C"
 
@@ -70,10 +66,12 @@ func GetRequestTimeoutException() *C.PyObject {
 
 	mod_name := C.CString("wsgo")
 	defer C.free(unsafe.Pointer(mod_name))
-	mod := C.PyImport_AddModule(mod_name) // borrowed reference
+	mod := C.PyImport_ImportModule(mod_name)
 	if mod == nil {
+		C.PyErr_Print()
 		log.Fatalln("Failed to import wsgo module!")
 	}
+	defer C.Py_DecRef(mod)
 
 	exc_name := C.CString("RequestTimeoutException")
 	defer C.free(unsafe.Pointer(exc_name))
@@ -394,7 +392,7 @@ func (worker *PythonWorker) CleanupStuckWorker() {
 
 	// Must be called with the runtime thread locked and GIL held.
 
-	cmd := C.CString(`
+	runPythonCode(`
 import logging
 
 # Release the global logging lock, if held
@@ -417,6 +415,4 @@ for wr in reversed(logging._handlerList[:]):
 	except:
 		pass
 `)
-	defer C.free(unsafe.Pointer(cmd))
-	C.PyRun_SimpleStringFlags(cmd, nil)
 }

@@ -17,6 +17,11 @@ var processManagerStopping bool = false
 var processCommands []*exec.Cmd
 var processCommandsMutex sync.Mutex
 
+// The Python interpreter and the command-line arguments (excluding the
+// program name) that started us, used to spawn the server processes.
+var pythonExecutable string
+var serverArgs []string
+
 func removeProcessCommand(cmd *exec.Cmd) {
 	processCommandsMutex.Lock()
 	defer processCommandsMutex.Unlock()
@@ -32,8 +37,9 @@ func RunProcess(wg *sync.WaitGroup, process int) {
 	defer wg.Done()
 
 	for {
-		args := append(os.Args[1:], "--process", strconv.Itoa(process))
-		cmd := exec.Command(os.Args[0], args...)
+		args := append([]string{"-m", "wsgo"}, serverArgs...)
+		args = append(args, "--process", strconv.Itoa(process))
+		cmd := exec.Command(pythonExecutable, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Env = append(
@@ -41,6 +47,8 @@ func RunProcess(wg *sync.WaitGroup, process int) {
 				// Stop glibc's per-thread arenas eating all the RAM, and
 				// encourage mmap use for allocations.
 				"GLIBC_TUNABLES=glibc.malloc.arena_max=2:glibc.malloc.mmap_threshold=250000",
+				// Don't buffer stdout/stderr, so logs appear promptly.
+				"PYTHONUNBUFFERED=1",
 			},
 			// Inherit parent process environment
 			os.Environ()...,

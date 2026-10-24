@@ -3,6 +3,7 @@ package wsgo
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"strings"
 )
@@ -51,7 +52,15 @@ var pageCacheLimit uint64 = 67108864
 var staticMap staticMapping
 var staticMaxAge int = 86400
 
-func ParseFlags() {
+func ParseFlags(args []string) {
+	// In a c-shared library os.Args holds the Python interpreter's argv, so
+	// parse the arguments we were given instead.
+	flag.CommandLine.Init("wsgo", flag.ExitOnError)
+	flag.CommandLine.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage of wsgo:")
+		flag.PrintDefaults()
+	}
+
 	flag.IntVar(&totalWorkers, "workers", totalWorkers, "total number of worker threads")
 	flag.IntVar(&processes, "processes", processes, "number of processes")
 	flag.IntVar(&process, "process", process, "process number (internal)")
@@ -62,9 +71,9 @@ func ParseFlags() {
 	flag.Uint64Var(&pageCacheLimit, "cache-size", pageCacheLimit, "maximum size of page cache in bytes")
 	flag.Var(&staticMap, "static-map", "static file folder mapping")
 	flag.IntVar(&staticMaxAge, "static-max-age", staticMaxAge, "encourage clients to cache static files for this many seconds (0 to disable)")
-	flag.Parse()
+	flag.CommandLine.Parse(args)
 
-	// Must be calculated after flag.Parse() so that a non-default --max-age
+	// Must be calculated after parsing so that a non-default --max-age
 	// enables stale-while-revalidate in TryCache.
 	maxAgeBeforeRefetch = maxAge / 2
 

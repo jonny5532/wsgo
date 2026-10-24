@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"sync/atomic"
 	"syscall"
-	"unsafe"
 )
 
 /*
@@ -24,6 +23,9 @@ var blockCount atomic.Uint64
 var blockedCount atomic.Uint64
 
 func PrintPythonTraceback() {
+	if pythonFinalizing.Load() {
+		return
+	}
 	runtime.LockOSThread()
 	gilState := C.PyGILState_Ensure()
 	printPythonTracebackLocked()
@@ -34,12 +36,10 @@ func PrintPythonTraceback() {
 // printPythonTracebackLocked prints stack traces of all Python threads.
 // It must be called with the GIL held.
 func printPythonTracebackLocked() {
-	cmd := C.CString(`
+	runPythonCode(`
 import faulthandler
 faulthandler.dump_traceback(all_threads=True)
 `)
-	defer C.free(unsafe.Pointer(cmd))
-	C.PyRun_SimpleStringFlags(cmd, nil)
 }
 
 func PrintRequestStats() {
@@ -72,9 +72,13 @@ func PrintMemoryStats() {
 	fmt.Println(p, "Goroutine count:", runtime.NumGoroutine())
 	fmt.Println(p, "Go allocated memory (in bytes):", rtm.Alloc)
 
+	if pythonFinalizing.Load() {
+		return
+	}
+
 	runtime.LockOSThread()
 	gilState := C.PyGILState_Ensure()
-	cmd := C.CString(`
+	runPythonCode(`
 import threading
 print("`+p+` Python live Thread count:", threading.active_count())
 
@@ -87,8 +91,6 @@ try:
 except ImportError:
 	pass
 `)
-	defer C.free(unsafe.Pointer(cmd))
-	C.PyRun_SimpleStringFlags(cmd, nil)
 	C.PyGILState_Release(gilState)
 	runtime.UnlockOSThread()
 }

@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/projecthunt/reuseable"
 )
@@ -27,6 +30,10 @@ var backgroundJobs chan *BackgroundJob
 var backgroundJobActive sync.Mutex
 
 var server *http.Server
+
+// pythonFinalizing is set once Main has handed control back to Python, after
+// which nothing else may call into the interpreter.
+var pythonFinalizing atomic.Bool
 
 func init() {
 	backgroundJobs = make(chan *BackgroundJob, 0)
@@ -116,12 +123,36 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func StartupWsgo(initMux func(*http.ServeMux)) {
-	ParseFlags()
+//export go_main
+func go_main(args **C.char, arg_lengths *C.int, args_size C.int, executable *C.char, executable_len C.int) C.int {
+	argPtrs := unsafe.Slice(args, int(args_size))
+	argLengths := unsafe.Slice(arg_lengths, int(args_size))
+	goArgs := make([]string, int(args_size))
+	for i := range goArgs {
+		goArgs[i] = C.GoStringN(argPtrs[i], argLengths[i])
+	}
+	return C.int(Main(goArgs, C.GoStringN(executable, executable_len)))
+}
+
+// Entry point for the Go process, which is called from Python with the GIL
+// held, returns with the GIL held.
+func Main(args []string, executable string) int {
+	ParseFlags(args)
+
+	pythonExecutable = executable
+	serverArgs = args
+
+	// We release and later reacquire the GIL with this thread's state, so it
+	// must stay on this OS thread.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	if process == 0 {
+		// The manager never imports the application.
+		threadState := C.PyEval_SaveThread()
 		RunProcessManager()
-		return
+		C.PyEval_RestoreThread(threadState)
+		return 0
 	}
 
 	listener, err := reuseable.Listen("tcp", bindAddress)
@@ -129,7 +160,9 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 		log.Fatalln(err)
 	}
 
-	InitPythonInterpreter(wsgiModule)
+	LoadApplication(wsgiModule)
+
+	threadState := C.PyEval_SaveThread()
 
 	StartWorkers()
 
@@ -138,7 +171,6 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 
 	serverMux := http.NewServeMux()
 	serverMux.HandleFunc("/", Serve)
-	initMux(serverMux)
 
 	// Go http's timeouts are rather crude.
 	server = &http.Server{
@@ -177,7 +209,7 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 		// Successfully shut down.
 	case <-time.After(time.Duration(requestTimeout) * time.Second):
 		// All requests should have completed by now, but something has hung.
-		// We'll still try and finalize the Python interpreter though.
+		// We'll still let Python finalize though.
 		shutdownTimedOut = true
 	}
 
@@ -185,30 +217,23 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 	// we can let Python finalize.
 	StopWorkers()
 
-	// Now try to shut down the Python interpreter.
-
-	finalized := make(chan bool, 0)
-	go func() {
-		select {
-		case <-finalized:
-			// Finalized succesfully.
-		case <-time.After(15 * time.Second):
-			// Py_Finalize probably won't return. Exit uncleanly so the
-			// process manager restarts us rather than treating this as a
-			// successful shutdown.
-			log.Println("Process", process, "finalize timed out, exiting.")
-			os.Exit(1)
-		}
-	}()
-
-	// This needs to be called from the same thread that
-	// called InitPythonInterpreter.
-	DeinitPythonInterpreter()
-	finalized <- true
-
 	if shutdownTimedOut {
 		log.Println("Process", process, "shutdown timed out, exiting.")
 	} else {
 		log.Println("Process", process, "shut down gracefully.")
 	}
+
+	// Python finalizes itself once we return. If that hangs, exit uncleanly
+	// so the process manager restarts us rather than treating this as a
+	// successful shutdown. A clean finalization exits the process before
+	// this fires.
+	go func() {
+		time.Sleep(15 * time.Second)
+		log.Println("Process", process, "finalize timed out, exiting.")
+		os.Exit(1)
+	}()
+
+	pythonFinalizing.Store(true)
+	C.PyEval_RestoreThread(threadState)
+	return 0
 }

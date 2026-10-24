@@ -1,14 +1,9 @@
+// The main package for the c-shared build of the _wsgo extension module.
+// The Python entry point is PyInit__wsgo in internal/wsgo/module.c.
 package main
 
 import (
-	"net/http"
-
-	"github.com/jonny5532/wsgo/internal/wsgo"
+	_ "github.com/jonny5532/wsgo/internal/wsgo"
 )
 
-func main() {
-	wsgo.StartupWsgo(func(mux *http.ServeMux) {
-//		_, done := wsgo.PyEval(`__import__("wsgo").cron`)
-//		done()
-	})
-}
+func main() {}

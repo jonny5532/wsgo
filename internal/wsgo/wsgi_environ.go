@@ -8,9 +8,7 @@ import (
 )
 
 /*
-#include <Python.h>
-
-extern PyObject *create_wsgi_input(long request_id);
+#include "module.h"
 */
 import "C"
 

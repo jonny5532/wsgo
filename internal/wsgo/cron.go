@@ -38,9 +38,16 @@ func init() {
 }
 
 func AddCron(function *C.PyObject, period int, min int, hour int, day int, mon int, wday int) {
+	name := "<unknown>"
 	str := C.PyObject_Str(function)
-	name := C.GoString(C.PyUnicode_AsUTF8(str))
-	C.Py_DecRef(str)
+	if str != nil {
+		if s := C.PyUnicode_AsUTF8AndSize(str, nil); s != nil {
+			name = C.GoString(s)
+		}
+		C.Py_DecRef(str)
+	} else {
+		C.PyErr_Clear()
+	}
 
 	addCron(function, name, period, min, hour, day, mon, wday)
 }
