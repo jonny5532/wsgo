@@ -4,9 +4,11 @@ A simple and fast Python WSGI application server written in Go, with sensible de
 
 ## Installation
 
-Binary packages are available via PyPI for Linux x86_64/arm64, install with:
+Binary packages are available via PyPI for Linux x86_64/arm64, for CPython 3.10 and later, install with:
 
 `pip install wsgo`
+
+This works with any interpreter setup (venv, uv, pyenv, conda, etc). On Python 3.6-3.9, pip will install the older 0.0.25 release instead.
 
 ## Quickstart
 
@@ -23,6 +25,8 @@ def application(env, start_response):
 2. Start wsgo with:
 
 `wsgo --module wsgi_app --http-socket 127.0.0.1:8000`
+
+(or equivalently, `python -m wsgo --module wsgi_app --http-socket 127.0.0.1:8000`)
 
 3. Go to `http://127.0.0.1:8000` in your web browser.
 
@@ -42,7 +46,7 @@ wsgo
 ## Features
 
 - Simple configuration with sensible defaults
-- Single executable (although requires the Python3 it is linked against to be installed)
+- Pip-installable extension module, a single wheel works with any CPython 3.10+
 - Multithreaded, with a multi-process mode
 - Built-in header-controlled response cache
 - Static file serving
@@ -54,9 +58,9 @@ wsgo
 
 ## Building from source
 
-If you have Docker installed, you can run `./build.sh` to produce Go executables and Python wheels for all currently supported versions of Python, in the `dist/` folder.
+With a Go toolchain and the Python development headers installed, you can build and install wsgo from a checkout with `pip install .`.
 
-Then either run `pip install <dist/file.whl>` to install `wsgo` in your bin folder, or manually retrieve the appropriate `dist/wsgo-*` executable and include it with your app.
+Alternatively, if you have Docker installed, you can run `./build.sh` (or `./build.sh arm64`) to produce a Python wheel in the `dist/` folder, then install it with `pip install <dist/file.whl>`.
 
 
 ## Caveats
@@ -69,7 +73,6 @@ Then either run `pip install <dist/file.whl>` to install `wsgo` in your bin fold
 ## Known issues
 
 - The `wsgi.input` file-like object only implements the `read(n)` and `readline()` methods (this is enough for Django).
-- It can't yet be built via the regular `python setup.py compile` mechanism.
 
 
 # Documentation
@@ -188,6 +191,8 @@ You can send signals to running wsgo processes to cause them to report status in
 `killall wsgo -s USR1` will print stack traces of all Python workers, which can be useful to diagnose hangs (such as every worker waiting for an unresponsive database with no timeout).
 
 `killall wsgo -s USR2` will print request and error count and memory statistics.
+
+The main `wsgo` process passes these signals on to each of its server processes, which show up as `python` processes. If you started wsgo with `python -m wsgo`, the main process is also named `python`, so send the signal to its process ID instead.
 
 
 ## Cron-like system
