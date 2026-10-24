@@ -4,7 +4,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestPathHasPrefix(t *testing.T) {
@@ -117,5 +119,46 @@ func TestStaticContentType(t *testing.T) {
 			t.Errorf("staticContentType(%q) left the file at the wrong offset", c.name)
 		}
 		f.Close()
+	}
+}
+
+func TestOpenRegular(t *testing.T) {
+	dir := t.TempDir()
+
+	file := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(file, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := openRegular(file)
+	if err != nil {
+		t.Fatalf("openRegular(regular file) failed: %v", err)
+	}
+	content, err := io.ReadAll(f)
+	f.Close()
+	if err != nil || string(content) != "hello" {
+		t.Fatalf("reading regular file got %q, %v", content, err)
+	}
+
+	if _, _, err := openRegular(dir); err == nil {
+		t.Error("openRegular accepted a directory")
+	}
+
+	// Opening a FIFO with no writer would block forever without O_NONBLOCK.
+	fifo := filepath.Join(dir, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := openRegular(fifo)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("openRegular accepted a FIFO")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("openRegular blocked opening a FIFO")
 	}
 }

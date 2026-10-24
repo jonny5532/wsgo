@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -83,9 +84,6 @@ func acceptsGzip(header string) bool {
 	return false
 }
 
-// openRegular opens path (which has already been resolved) and returns the
-// open file and its FileInfo, rejecting directories. Opening before stating
-// avoids a TOCTOU on the file type.
 // staticContentType returns the Content-Type for the file at path, open as f,
 // from its extension, or else by sniffing its contents (as ServeContent does).
 // The system MIME tables may be missing (eg. slim container images), and Go's
@@ -107,13 +105,18 @@ func staticContentType(path string, f *os.File) string {
 	return http.DetectContentType(buf[:n])
 }
 
+// openRegular opens path (which has already been resolved) and returns the
+// open file and its FileInfo, rejecting anything but regular files (such as
+// directories, FIFOs and devices). Opening before stating avoids a TOCTOU on
+// the file type, and O_NONBLOCK stops the open itself blocking on a FIFO
+// (it has no effect on reading regular files).
 func openRegular(path string) (*os.File, os.FileInfo, error) {
-	f, err := os.Open(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, nil, err
 	}
 	stat, err := f.Stat()
-	if err != nil || stat.IsDir() {
+	if err != nil || !stat.Mode().IsRegular() {
 		f.Close()
 		if err == nil {
 			err = os.ErrNotExist
