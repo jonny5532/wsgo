@@ -109,6 +109,22 @@ func RunProcessManager() {
 		}
 	}()
 
+	// Pass the status signals on to the server processes. The manager is a
+	// Python process, so without this they would terminate it.
+	statusSigs := make(chan os.Signal, 1)
+	signal.Notify(statusSigs, syscall.SIGUSR1, syscall.SIGUSR2)
+	go func() {
+		for sig := range statusSigs {
+			processCommandsMutex.Lock()
+			for _, cmd := range processCommands {
+				if cmd.Process != nil {
+					cmd.Process.Signal(sig)
+				}
+			}
+			processCommandsMutex.Unlock()
+		}
+	}()
+
 	wg.Wait()
 }
 
