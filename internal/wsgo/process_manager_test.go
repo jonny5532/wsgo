@@ -1,7 +1,6 @@
 package wsgo
 
 import (
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -10,9 +9,9 @@ import (
 // TestRunProcessHandlesStartFailure checks that a child process which can't
 // even be executed (so ProcessState is nil) doesn't panic the manager.
 func TestRunProcessHandlesStartFailure(t *testing.T) {
-	oldArgs := os.Args
-	os.Args = []string{"/nonexistent/wsgo-test-binary"}
-	defer func() { os.Args = oldArgs }()
+	oldExecutable := pythonExecutable
+	pythonExecutable = "/nonexistent/wsgo-test-binary"
+	defer func() { pythonExecutable = oldExecutable }()
 
 	processManagerStopping = false
 	defer func() { processManagerStopping = false }()
