@@ -44,6 +44,24 @@ def cache_landing(environ, start_response):
     ])
 
 
+park_on_refresh_calls = 0
+
+
+@router.route('/cache/park-on-refresh')
+def cache_park_on_refresh(environ, start_response):
+    """Cacheable the first time, but parks when it is refreshed."""
+    global park_on_refresh_calls
+    park_on_refresh_calls += 1
+    if park_on_refresh_calls == 1:
+        return toolkit.respond(start_response, b'cached', headers=[
+            ('Cache-Control', 'max-age=60'),
+        ])
+    return toolkit.respond(start_response, b'', headers=[
+        ('X-WSGo-Park', 'never-notified'),
+        ('X-WSGo-Park-Timeout', '1 http-504'),
+    ])
+
+
 @router.route('/cache/slow')
 def cache_slow(environ, start_response):
     time.sleep(0.5)

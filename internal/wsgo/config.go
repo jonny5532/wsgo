@@ -44,8 +44,6 @@ var backgroundTimeout int = 1800
 var maxQueueLength int = 128
 var requestBufferLength int = 1048576
 
-// response buffering involves an extra copy so often isn't a performance gain
-var responseBufferLength int = 0 //1048576
 var maxAge int = 0
 var pageCacheLimit uint64 = 67108864
 var staticMap staticMapping

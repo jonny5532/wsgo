@@ -169,7 +169,7 @@ func ParkJob(job *RequestJob) {
 
 	// we deliberately don't handle any accels from retries
 
-	cw.Flush()
+	cw.Finish()
 }
 
 // NotifyParked wakes up any parked requests waiting on one of the supplied

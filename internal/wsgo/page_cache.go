@@ -368,24 +368,51 @@ func directiveSeconds(directives map[string]string, name string) int {
 	return n
 }
 
-// CachePage stores the response if its headers allow it, returning whether it
-// was cached.
-func CachePage(cw *CacheWriter, req *http.Request) bool {
-	responseHeaders := cw.Header()
-
-	if req.Header.Get("Authorization") != "" {
+// requestMayBeCached reports whether the response to a request may be stored
+// in the page cache.
+func requestMayBeCached(req *http.Request) bool {
+	if maxAge <= 0 || pageCacheLimit == 0 {
 		return false
 	}
+	if req.Method != "GET" && req.Method != "HEAD" && req.Method != "OPTIONS" {
+		return false
+	}
+	// Responses to authorised requests are likely to be specific to the user.
+	return req.Header.Get("Authorization") == ""
+}
 
-	if responseHeaders.Get("Set-Cookie") != "" {
+// How a response's headers say it may be cached.
+type cachePolicy struct {
+	lifetime time.Duration
+	// How long it may be served for after expiring, whilst being refreshed.
+	staleWhileRevalidate time.Duration
+	// The request headers it varies on.
+	vary []string
+}
+
+// parseCachePolicy returns how a response may be cached, or false if it can't
+// be.
+func parseCachePolicy(statusCode int, header http.Header) (cachePolicy, bool) {
+	var policy cachePolicy
+
+	if statusCode != 200 && statusCode != 204 && statusCode != 301 {
+		// Probably an error of some kind
+		return policy, false
+	}
+
+	if header.Get("Set-Cookie") != "" {
 		// don't cache set-cookie responses
-		return false
+		return policy, false
 	}
 
-	directives := parseCacheControl(responseHeaders.Values("Cache-Control"))
+	if contentLength, err := strconv.Atoi(header.Get("Content-Length")); err == nil && contentLength > cacheWriterLimit {
+		return policy, false
+	}
+
+	directives := parseCacheControl(header.Values("Cache-Control"))
 	for _, d := range []string{"no-cache", "no-store", "private"} {
 		if _, ok := directives[d]; ok {
-			return false
+			return policy, false
 		}
 	}
 
@@ -397,19 +424,36 @@ func CachePage(cw *CacheWriter, req *http.Request) bool {
 	}
 	lifetimeSeconds = min(maxAge, lifetimeSeconds)
 	if lifetimeSeconds <= 0 {
+		return policy, false
+	}
+	policy.lifetime = time.Duration(lifetimeSeconds) * time.Second
+
+	staleSeconds := min(maxAge, max(0, directiveSeconds(directives, "stale-while-revalidate")))
+	policy.staleWhileRevalidate = time.Duration(staleSeconds) * time.Second
+
+	for _, vary := range splitHeaderList(header.Values("Vary")) {
+		if vary == "*" {
+			// varies on something other than request headers
+			return policy, false
+		}
+		policy.vary = append(policy.vary, http.CanonicalHeaderKey(vary))
+	}
+
+	return policy, true
+}
+
+// CachePage stores the response written to cw, if its headers allowed it to
+// be cached, returning whether it was.
+func CachePage(cw *CacheWriter, req *http.Request) bool {
+	if !cw.caching {
 		return false
 	}
-	staleSeconds := min(maxAge, max(0, directiveSeconds(directives, "stale-while-revalidate")))
+	policy := cw.policy
 
 	// Store any request headers which are indicated by the Vary header, as the
 	// cache will need to be keyed on these.
 	varies := make(map[string]*string)
-	for _, vary := range splitHeaderList(responseHeaders.Values("Vary")) {
-		if vary == "*" {
-			// varies on something other than request headers
-			return false
-		}
-		vary = http.CanonicalHeaderKey(vary)
+	for _, vary := range policy.vary {
 		header := req.Header.Get(vary)
 		varies[vary] = &header
 	}
@@ -421,12 +465,18 @@ func CachePage(cw *CacheWriter, req *http.Request) bool {
 		varies["Cookie"] = &v
 	}
 
+	buf := cw.buf
+	if req.Method == "HEAD" {
+		// The body of a HEAD response is never sent.
+		buf = nil
+	}
+
 	now := time.Now()
-	lifetime := time.Second * time.Duration(lifetimeSeconds)
+	lifetime := policy.lifetime
 	entry := &PageCacheEntry{
-		buf:         cw.buf,
+		buf:         buf,
 		statusCode:  cw.statusCode,
-		header:      responseHeaders.Clone(),
+		header:      cw.Header().Clone(),
 		vary:        varies,
 		varyCookies: cw.varyCookies,
 		created:     now,
@@ -435,7 +485,7 @@ func CachePage(cw *CacheWriter, req *http.Request) bool {
 		// only rendering it a third more often than if it were left to expire.
 		refreshAfter: now.Add(lifetime - lifetime/4),
 		expiry:       now.Add(lifetime),
-		staleUntil:   now.Add(lifetime + time.Second*time.Duration(staleSeconds)),
+		staleUntil:   now.Add(lifetime + policy.staleWhileRevalidate),
 		lastUsed:     now,
 	}
 
@@ -550,11 +600,6 @@ func coalesceKeyLocked(req *http.Request, ck cacheKey, now time.Time) string {
 // after which the cache can be tried again. If the request shouldn't be
 // coalesced, both are nil.
 func JoinCacheFill(req *http.Request) (*CacheFill, <-chan struct{}) {
-	if req.Header.Get("Authorization") != "" {
-		// never cached
-		return nil, nil
-	}
-
 	pageCacheMutex.Lock()
 	defer pageCacheMutex.Unlock()
 

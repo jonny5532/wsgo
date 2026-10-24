@@ -34,3 +34,8 @@
   - The new `X-WSGo-Ignore-Params` response header lists query parameters
     (such as `utm_*` tracking parameters) to ignore when looking up the cache.
   - `X-WSGo-Vary-Cookies` is no longer sent to the client.
+  - Fixed a crash when a page being refreshed in the background responded
+    with `X-WSGo-Park`.
+  - Responses are only copied for the cache if their headers allow them to
+    be cached, rather than every `GET` response being copied (up to 1MB)
+    whenever the cache was enabled.

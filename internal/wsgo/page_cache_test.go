@@ -526,3 +526,116 @@ func TestCacheDirectivesAreNotSentToClient(t *testing.T) {
 		t.Errorf("unexpected directives %q, %q", cw.varyCookies, cw.ignoreParams)
 	}
 }
+
+func TestCacheWriterOnlyCopiesCacheableResponses(t *testing.T) {
+	setUpPageCacheTest(t, 3600)
+
+	cases := []struct {
+		name    string
+		status  int
+		header  http.Header
+		caching bool
+	}{
+		{"cacheable", 200, http.Header{"Cache-Control": {"max-age=60"}}, true},
+		{"no cache-control", 200, http.Header{}, false},
+		{"no-store", 200, http.Header{"Cache-Control": {"max-age=60, no-store"}}, false},
+		{"error", 500, http.Header{"Cache-Control": {"max-age=60"}}, false},
+		{"set-cookie", 200, http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"a=b"}}, false},
+		{"vary star", 200, http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"*"}}, false},
+		{"too long", 200, http.Header{"Cache-Control": {"max-age=60"}, "Content-Length": {"2000000"}}, false},
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		cw := NewCacheWriter(rec)
+		for k, vv := range c.header {
+			cw.Header()[k] = vv
+		}
+		cw.WriteHeader(c.status)
+		cw.Write([]byte("body"))
+
+		if rec.Body.String() != "body" {
+			t.Errorf("%s: expected the body to be sent to the client", c.name)
+		}
+		if cw.caching != c.caching {
+			t.Errorf("%s: expected caching=%v", c.name, c.caching)
+		}
+		if !c.caching && cw.buf != nil {
+			t.Errorf("%s: expected an uncacheable response not to be copied", c.name)
+		}
+	}
+}
+
+func TestCacheWriterStopsCachingLargeResponses(t *testing.T) {
+	setUpPageCacheTest(t, 3600)
+
+	req := newTestRequest(t, "http://example.com/large", nil)
+	rec := httptest.NewRecorder()
+	cw := NewCacheWriter(rec)
+	cw.Header().Set("Cache-Control", "max-age=60")
+	chunk := []byte(strings.Repeat("a", cacheWriterLimit/2+1))
+	cw.Write(chunk)
+	cw.Write(chunk)
+	cw.Finish()
+
+	if rec.Body.Len() != 2*len(chunk) {
+		t.Error("expected the whole response to be sent to the client")
+	}
+	if cw.buf != nil || CachePage(cw, req) {
+		t.Error("expected a response over the size limit not to be cached")
+	}
+}
+
+type failingWriter struct {
+	*httptest.ResponseRecorder
+}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, fmt.Errorf("connection reset")
+}
+
+func TestCacheWriterDoesNotCacheIncompleteResponses(t *testing.T) {
+	setUpPageCacheTest(t, 3600)
+
+	req := newTestRequest(t, "http://example.com/incomplete", nil)
+	cw := NewCacheWriter(failingWriter{httptest.NewRecorder()})
+	cw.Header().Set("Cache-Control", "max-age=60")
+	cw.WriteHeader(200)
+	if _, err := cw.Write([]byte("body")); err == nil {
+		t.Fatal("expected the write error to be returned")
+	}
+	if CachePage(cw, req) {
+		t.Error("expected a response which failed to send not to be cached")
+	}
+}
+
+func TestCacheOnlyCacheWriter(t *testing.T) {
+	setUpPageCacheTest(t, 3600)
+
+	req := newTestRequest(t, "http://example.com/refresh-only", nil)
+	cw := NewCacheOnlyCacheWriter()
+	cw.Header().Set("Cache-Control", "max-age=60")
+	cw.Write([]byte("fresh"))
+	cw.Finish()
+
+	if !CachePage(cw, req) || cachedBody(t, "http://example.com/refresh-only") != "fresh" {
+		t.Error("expected the refreshed response to be cached")
+	}
+	if _, err := cw.Write([]byte("late")); err == nil {
+		t.Error("expected writes after Finish to fail")
+	}
+}
+
+func TestCacheHeadResponseKeepsNoBody(t *testing.T) {
+	setUpPageCacheTest(t, 3600)
+
+	req, _ := http.NewRequest("HEAD", "http://example.com/head", nil)
+	cw := NewCacheWriter(httptest.NewRecorder())
+	cw.Header().Set("Cache-Control", "max-age=60")
+	cw.Write([]byte("body"))
+	if !CachePage(cw, req) {
+		t.Fatal("expected the HEAD response to be cached")
+	}
+	if entry := onlyCacheEntry(t, req); entry.buf != nil {
+		t.Error("expected the cached HEAD response to have no body")
+	}
+}

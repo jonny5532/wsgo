@@ -358,6 +358,30 @@ class BasicTests(WsgoTestCase):
         time.sleep(0.5)
         self.assertNotEqual(self.get('/cache/time').text, t0)
 
+    def test_cache_refresh_that_parks(self):
+        """
+        A background refresh has no client, so a refreshed response that asks
+        to park must be dropped rather than parked.
+        """
+
+        self.start('--workers', '1', '--max-age', '4', module='fixtures.cache')
+
+        # Keep the connection open, as a browser would, so that the request
+        # isn't cancelled before a parked refresh would time out.
+        session = requests.Session()
+        self.addCleanup(session.close)
+        url = self.url('/cache/park-on-refresh')
+
+        self.assertEqual(session.get(url, timeout=10).text, 'cached')
+        time.sleep(3.2)
+        # Served from cache, and triggers the refresh, which parks.
+        self.assertEqual(session.get(url, timeout=10).text, 'cached')
+        # Wait past the park timeout, when a parked refresh would respond.
+        time.sleep(2)
+        # This used to crash the server.
+        self.assertIsNone(self.process.poll())
+        self.assertNotIn('parked request', self.server_output())
+
     def test_cache_ignores_params(self):
         self.start('--max-age', '60', module='fixtures.cache')
 

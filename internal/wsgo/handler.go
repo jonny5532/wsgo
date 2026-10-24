@@ -48,16 +48,15 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	cacheableMethod := req.Method == "GET" || req.Method == "HEAD" || req.Method == "OPTIONS"
-	cachingEnabled := cacheableMethod && maxAge > 0 && pageCacheLimit > 0
+	mayBeCached := requestMayBeCached(req)
 
 	try_cache_status := MISS
-	if cacheableMethod {
+	if req.Method == "GET" || req.Method == "HEAD" || req.Method == "OPTIONS" {
 		try_cache_status = TryCache(w, req)
 	}
 
 	var fill *CacheFill
-	if try_cache_status == MISS && cachingEnabled {
+	if try_cache_status == MISS && mayBeCached {
 		var wait <-chan struct{}
 		fill, wait = JoinCacheFill(req)
 		if wait != nil {
@@ -101,18 +100,16 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 
 	var cw *CacheWriter
 
-	if cachingEnabled {
-		// We might be able to cache this
-		if alreadyResponded {
-			cw = NewCacheOnlyCacheWriter()
-		} else {
-			cw = NewCacheWriter(w)
+	if alreadyResponded {
+		if !mayBeCached {
+			// Nothing to refresh
+			return
 		}
-	} else if alreadyResponded {
-		// We already responded, and are not going to cache, so bail
-		return
+		// Refresh the cache entry, with no client to send the response to
+		cw = NewCacheOnlyCacheWriter()
+	} else if mayBeCached {
+		cw = NewCacheWriter(w)
 	} else {
-		// Response won't be cached
 		cw = NewNonCachingCacheWriter(w)
 	}
 
@@ -139,22 +136,26 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 
 	scheduler.HandleJob(job, time.Duration(requestTimeout)*time.Second)
 
-	if fill != nil && (job.sendFile != "" || job.parkedId != "") {
+	if job.sendFile != "" || job.parkedId != "" {
 		// Accelerated responses aren't cached, and parking can take a long
 		// time, so don't keep any waiting requests waiting.
-		fill.Finish(false)
-		fill = nil
+		cw.stopCaching()
+		if fill != nil {
+			fill.Finish(false)
+			fill = nil
+		}
+		if alreadyResponded {
+			// A refresh has no client to send a file to or to park.
+			return
+		}
 	}
 
 	if ResolveAccel(job) {
 		return
 	}
 
-	cw.Flush()
-
-	if !cw.skipCaching {
-		cached = CachePage(cw, req)
-	}
+	cw.Finish()
+	cached = CachePage(cw, req)
 }
 
 //export go_main
