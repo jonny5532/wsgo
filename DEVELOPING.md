@@ -86,8 +86,18 @@ docker run -it --rm -v $PWD:/work -w /work --platform linux/amd64 $(docker build
 docker run -it --rm -v $PWD:/work -w /work --platform linux/arm64 $(docker build -q --platform linux/arm64 -f Dockerfile.auditwheel .) auditwheel repair --plat manylinux_2_17_aarch64 dist/wsgo-0.1.?-cp310-abi3-linux_aarch64.whl
 ```
 
-Use `auditwheel show` to find the lowest platform tag a wheel supports; a
-wheel built on bookworm (eg. for aarch64) needs `manylinux_2_34`.
+Use `auditwheel show` to find the lowest platform tag a wheel supports. The
+0.1.0 x86_64 wheel built on bullseye is `manylinux_2_17` (the c-shared Go
+runtime doesn't raise the floor); a wheel built on bookworm (eg. for aarch64)
+needs `manylinux_2_34`. To check the floor of a bullseye build:
+
+```sh
+git archive HEAD | docker build --platform linux/amd64 \
+  --build-arg PY_MIN=10 --build-arg DEBIAN_RELEASE=bullseye \
+  -t wsgo-glibc-floor - \
+&& docker run --rm --platform linux/amd64 wsgo-glibc-floor \
+  bash -c "pip install -q 'auditwheel<6.4' && auditwheel show dist/*.whl"
+```
 
 ```sh
 # Upload to PyPI
