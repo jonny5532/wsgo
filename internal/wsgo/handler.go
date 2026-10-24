@@ -182,8 +182,7 @@ func StartupWsgo(initMux func(*http.ServeMux)) {
 	}
 
 	// Stop the worker goroutines (and their Python thread states) before
-	// finalizing the interpreter; Py_Finalize must not run while workers are
-	// still alive.
+	// we can let Python finalize.
 	StopWorkers()
 
 	// Now try to shut down the Python interpreter.

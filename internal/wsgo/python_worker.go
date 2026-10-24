@@ -206,8 +206,7 @@ func (worker *PythonWorker) RunPythonTask(task func(), timeout int) (time.Time, 
 
 	task()
 
-	// The task has finished; record it (still holding the GIL) before the
-	// timeout goroutine can check it.
+	// Record that we are finished whilst we still have the GIL
 	finished.Store(true)
 
 	if worker.stuck.Load() {

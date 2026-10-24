@@ -4,3 +4,7 @@ __pycache__
 app
 oldapp
 wheelhouse
+wsgo/_wsgo*.so
+wsgo/_wsgo*.h
+build/
+*.egg-info/

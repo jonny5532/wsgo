@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/jonny5532/wsgo/wsgo"
+	"github.com/jonny5532/wsgo/internal/wsgo"
 )
 
 func main() {

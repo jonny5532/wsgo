@@ -30,9 +30,7 @@ type RequestJob struct {
 	worker     int
 	priority   int
 
-	// Scheduling inputs that are fixed for the lifetime of a queued job,
-	// precomputed by HandleJob so the priority scan doesn't re-parse the
-	// request for every candidate.
+	// Scheduling inputs that are fixed for the lifetime of a queued job
 	basePriority   int
 	rateLimitKey   string
 	demoteBySource bool
@@ -198,10 +196,8 @@ func GetRateLimitKey(ip net.IP) string {
 
 var crawlerUserAgents = []string{"facebook", "bot", "crawler", "spider", "index", "http:", "https:"}
 
-// PrecomputeJobPriority calculates the parts of a job's priority that cannot
-// change while it is queued: the crawler and query-string demotions, and the
-// source key used for rate limiting. It must be called before the job is added
-// to the queue.
+// Calculate the parts of a job priority that won't change while it is queued,
+// called before it is added to teh queue.
 func (sched *Scheduler) PrecomputeJobPriority(job *RequestJob) {
 	job.basePriority = 1000
 
