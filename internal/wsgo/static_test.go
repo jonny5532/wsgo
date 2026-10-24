@@ -1,6 +1,11 @@
 package wsgo
 
-import "testing"
+import (
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestPathHasPrefix(t *testing.T) {
 	cases := []struct {
@@ -70,5 +75,47 @@ func TestAcceptsGzip(t *testing.T) {
 		if got := acceptsGzip(c.header); got != c.want {
 			t.Errorf("acceptsGzip(%q) = %v, want %v", c.header, got, c.want)
 		}
+	}
+}
+
+func TestStaticContentType(t *testing.T) {
+	dir := t.TempDir()
+
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		// Known to Go's built-in table, so not sniffed.
+		{"style.css", "body {}", "text/css; charset=utf-8"},
+		// An extension no MIME table knows, so the content is sniffed.
+		{"notes.wsgotest", "just some text", "text/plain; charset=utf-8"},
+		{"page.wsgotest", "<!DOCTYPE html><html></html>", "text/html; charset=utf-8"},
+		{"empty.wsgotest", "", "text/plain; charset=utf-8"},
+	}
+
+	for _, c := range cases {
+		path := filepath.Join(dir, c.name)
+		if err := os.WriteFile(path, []byte(c.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := staticContentType(path, f); got != c.want {
+			t.Errorf("staticContentType(%q) = %q, want %q", c.name, got, c.want)
+		}
+
+		// The file must be left at the start, for serving.
+		rest, err := io.ReadAll(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(rest) != c.content {
+			t.Errorf("staticContentType(%q) left the file at the wrong offset", c.name)
+		}
+		f.Close()
 	}
 }

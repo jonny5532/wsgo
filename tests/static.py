@@ -86,6 +86,28 @@ class StaticTests(WsgoTestCase):
             self.assertIsNone(r.headers.get('Content-Encoding'))
             self.assertEqual(r.content, body)
 
+    def test_static_gzip_unknown_extension(self):
+        """
+        gzip sidecars are used even when the extension isn't in any MIME
+        table (eg. slim images have no /etc/mime.types), with the
+        Content-Type sniffed from the uncompressed file.
+        """
+
+        with tempfile.TemporaryDirectory() as webroot:
+            body = b'plain body'
+            with open(os.path.join(webroot, 'file.wsgotest'), 'wb') as f:
+                f.write(body)
+            with open(os.path.join(webroot, 'file.wsgotest.gz'), 'wb') as f:
+                f.write(gzip.compress(body))
+
+            self.start('--static-map', '/=' + webroot)
+
+            r = self.get('/file.wsgotest', headers={'Accept-Encoding': 'gzip'})
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.headers.get('Content-Encoding'), 'gzip')
+            self.assertEqual(r.headers.get('Content-Type'), 'text/plain; charset=utf-8')
+            self.assertEqual(r.content, body)
+
     def test_static_does_not_shadow_post(self):
         """
         Non-GET/HEAD methods must reach the WSGI application even when the

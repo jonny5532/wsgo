@@ -1,6 +1,7 @@
 package wsgo
 
 import (
+	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -85,6 +86,27 @@ func acceptsGzip(header string) bool {
 // openRegular opens path (which has already been resolved) and returns the
 // open file and its FileInfo, rejecting directories. Opening before stating
 // avoids a TOCTOU on the file type.
+// staticContentType returns the Content-Type for the file at path, open as f,
+// from its extension, or else by sniffing its contents (as ServeContent does).
+// The system MIME tables may be missing (eg. slim container images), and Go's
+// built-in table is small. f is left at the start, and "" is returned if it
+// can't be read.
+func staticContentType(path string, f *os.File) string {
+	if ctype := mime.TypeByExtension(filepath.Ext(path)); ctype != "" {
+		return ctype
+	}
+
+	var buf [512]byte
+	n, err := io.ReadFull(f, buf[:])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return ""
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return ""
+	}
+	return http.DetectContentType(buf[:n])
+}
+
 func openRegular(path string) (*os.File, os.FileInfo, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -155,12 +177,11 @@ func TryStatic(w http.ResponseWriter, req *http.Request) bool {
 			if gz_err == nil && isPathWithin(gz_path, local_prefix) {
 				gz_file, gz_stat, gz_err := openRegular(gz_path)
 				if gz_err == nil {
-					ctype := mime.TypeByExtension(filepath.Ext(file_path))
+					// We have to figure out the Content-Type ourselves, else
+					// ServeContent will guess it from the compressed bytes.
+					ctype := staticContentType(file_path, f)
 					if ctype != "" {
 						// use gzipped file instead
-						// we have to figure out the Content-Type ourselves,
-						// else ServeContent will guess it wrong; only support
-						// extension-based guessing for now
 						f.Close()
 						f = gz_file
 						stat = gz_stat
