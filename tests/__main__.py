@@ -6,6 +6,7 @@ from .park import *
 from .block import *
 from .static import *
 from .priority import *
+from .launch import *
 
 print("Testing on", sys.version)
 unittest.main(buffer=True)

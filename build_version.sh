@@ -1,5 +1,10 @@
-# usage ./build_version.sh <python major version> <python minor version> <python patch version> <pkgconfig name> <architecture>
-# eg: ./build_version.sh 3 8 12 python-3.8-embed x86_64
+# Builds the Docker image for a Python version and architecture (which builds
+# and installs the wheel), then runs a command in it.
+# usage: ./build_version.sh <python major version> <python minor version> <architecture> [command]
+# eg: ./build_version.sh 3 12 x86_64 "python -m tests"
+#
+# The default command copies the wheel to dist/. Release wheels are built with
+# ./build_arch.sh, which uses the oldest supported Python.
 
 PY_MAJ=${1:-3}
 PY_MIN=${2:-10}
@@ -28,7 +33,7 @@ case $ARCH in
 esac
 
 
-ACTION=${4:-"cp bin/wsgo /output/wsgo-cp${PY_MAJ}${PY_MIN}-linux_${ARCH}; cp dist/*.whl /output"}
+ACTION=${4:-"cp dist/*.whl /output"}
 
 
 DOCKER_BUILDKIT=1 docker build \

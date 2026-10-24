@@ -40,12 +40,25 @@ class WsgoTestCase(unittest.TestCase):
         kwargs.setdefault('timeout', 10)
         return requests.post(self.url(path), **kwargs)
 
-    def start(self, *args, env=None, drain=True, module=None):
+    def start(self, *args, env=None, drain=True, module=None, python_m=False,
+              processes=None):
+        """Start the server. By default this runs the `wsgo` console script as
+        a single server process; python_m launches it with `python -m wsgo`
+        instead, and processes runs the process manager with that many
+        server processes."""
         proc_env = os.environ.copy()
         if env:
             proc_env.update(env)
 
-        cmd = ['wsgo', '--module', module or self.module, '--process', '1']
+        if python_m:
+            cmd = [sys.executable, '-m', 'wsgo']
+        else:
+            cmd = ['wsgo']
+        cmd += ['--module', module or self.module]
+        if processes:
+            cmd += ['--processes', str(processes)]
+        else:
+            cmd += ['--process', '1']
         cmd += [str(arg) for arg in args]
 
         self.process = subprocess.Popen(
