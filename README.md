@@ -196,7 +196,9 @@ The first 1mb of POST/PUT/PATCH request bodies will be buffered before the WSGI 
 
 Responses are not buffered.
 
-It is therefore possible for users on slow connections to tie up handlers for a significant time during large uploads or downloads - if this is a concern then consider using a buffering load balancer upstream of wsgo.
+To stop slow (or deliberately stalling) clients from tying up handlers, clients must send request bodies and receive responses at an average of at least 4KB/s, or the connection is dropped. Only time spent waiting on the client counts, so the application can pause for as long as it likes between reads or writes (eg. when long-polling), and there is a 30 second allowance for the start of a transfer and for brief stalls. A request whose initially buffered body can't be read at this rate is rejected with a `408` without being passed to the application.
+
+Users on slow connections can still tie up handlers for some time during large uploads or downloads - if this is a concern then consider using a buffering load balancer upstream of wsgo.
 
 
 ## Signals

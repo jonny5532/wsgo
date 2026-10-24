@@ -39,3 +39,7 @@
   - Responses are only copied for the cache if their headers allow them to
     be cached, rather than every `GET` response being copied (up to 1MB)
     whenever the cache was enabled.
+- Clients must send request bodies and receive responses at an average of at
+  least 4KB/s (after a 30 second allowance), so that slow or stalling clients
+  can't tie up workers. Time spent by the application between reads and
+  writes doesn't count.

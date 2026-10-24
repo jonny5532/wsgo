@@ -2,6 +2,7 @@ package wsgo
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -114,6 +115,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var requestReader RequestReader
+	body := newMinRateReader(req.Body, w)
 
 	if requestBufferLength > 0 && (req.Method == "POST" || req.Method == "PUT" || req.Method == "PATCH") {
 		reqBufLen, err := strconv.Atoi(req.Header.Get("Content-length"))
@@ -122,9 +124,17 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		}
 		// Read and buffer an initial chunk of the request body (good to do
 		// this now before we tie up a Python worker, since it will block).
-		requestReader = NewBufferingReader(req.Body, reqBufLen)
+		bufferingReader := NewBufferingReader(body, reqBufLen)
+		if errors.Is(bufferingReader.initialErr, os.ErrDeadlineExceeded) {
+			// The client is sending the body too slowly to be worth a worker.
+			w.Header().Set("Connection", "close")
+			http.Error(w, "Request Timeout", http.StatusRequestTimeout)
+			LogRequest(req, http.StatusRequestTimeout, time.Now(), 0, 0, 0, 0)
+			return
+		}
+		requestReader = bufferingReader
 	} else {
-		requestReader = NewBufferingReader(req.Body, 0)
+		requestReader = NewBufferingReader(body, 0)
 	}
 
 	job := &RequestJob{

@@ -11,6 +11,8 @@ type BufferingReader struct {
 	initial  []byte
 	// whether `initial` holds the entire request or not
 	partial  bool
+	// the error, if any, from reading the initial chunk
+	initialErr error
 }
 
 func NewBufferingReader(r io.Reader, bufLen int) *BufferingReader {
@@ -21,8 +23,9 @@ func NewBufferingReader(r io.Reader, bufLen int) *BufferingReader {
 	// Read and buffer an initial chunk
 	if bufLen > 0 {
 		buf := make([]byte, bufLen)
-		n, _ := io.ReadFull(r, buf)
+		n, err := io.ReadFull(r, buf)
 		b.buf = buf[:n]
+		b.initialErr = err
 		b.initial = b.buf
 	}
 	return b

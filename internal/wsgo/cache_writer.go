@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // A CacheWriter passes a response through to the client, keeping a copy of
@@ -11,6 +12,7 @@ import (
 type CacheWriter struct {
 	writer      http.ResponseWriter // nil if there's no client to send to
 	header      http.Header         // used instead of the writer's if there's no client
+	limit       *transferRateLimit
 	statusCode  int
 	wroteHeader bool
 	finished    bool
@@ -31,7 +33,11 @@ var cacheWriterLimit = 1000000
 
 // NewCacheWriter returns a writer for a response which might be cached.
 func NewCacheWriter(w http.ResponseWriter) *CacheWriter {
-	return &CacheWriter{writer: w, caching: true}
+	return &CacheWriter{
+		writer:  w,
+		limit:   newTransferRateLimit(http.NewResponseController(w).SetWriteDeadline),
+		caching: true,
+	}
 }
 
 // NewCacheOnlyCacheWriter returns a writer which only caches the response,
@@ -43,7 +49,10 @@ func NewCacheOnlyCacheWriter() *CacheWriter {
 // NewNonCachingCacheWriter returns a writer which only passes the response
 // through to the client.
 func NewNonCachingCacheWriter(w http.ResponseWriter) *CacheWriter {
-	return &CacheWriter{writer: w}
+	return &CacheWriter{
+		writer: w,
+		limit:  newTransferRateLimit(http.NewResponseController(w).SetWriteDeadline),
+	}
 }
 
 func (cw *CacheWriter) Header() http.Header {
@@ -112,7 +121,7 @@ func (cw *CacheWriter) Write(b []byte) (int, error) {
 	if cw.writer == nil {
 		return len(b), nil
 	}
-	n, err := cw.writer.Write(b)
+	n, err := cw.writeToClient(b)
 	if err != nil {
 		// An incomplete response mustn't be cached.
 		cw.stopCaching()
@@ -120,7 +129,35 @@ func (cw *CacheWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// writeToClient writes to the client in pieces, enforcing the minimum
+// transfer rate.
+func (cw *CacheWriter) writeToClient(b []byte) (int, error) {
+	if len(b) == 0 {
+		return cw.writer.Write(b)
+	}
+
+	written := 0
+	for written < len(b) {
+		piece := b[written:min(len(b), written+transferChunkSize)]
+		n, err := cw.limit.do(func() (int, error) {
+			return cw.writer.Write(piece)
+		})
+		written += n
+		if err != nil {
+			return written, err
+		}
+	}
+	return written, nil
+}
+
 // Finish marks the response as complete, after which any further writes fail.
 func (cw *CacheWriter) Finish() {
 	cw.finished = true
+
+	if cw.writer != nil {
+		// The end of the response is sent once the handler returns, which
+		// may be long after the last write if the application paused, so
+		// the last write's deadline may already have passed.
+		http.NewResponseController(cw.writer).SetWriteDeadline(time.Now().Add(transferGrace))
+	}
 }
