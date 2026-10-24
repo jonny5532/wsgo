@@ -22,6 +22,15 @@ case $ARCH in
     ;;
 esac
 
+# Building for another architecture runs its binaries under qemu, which needs
+# a binfmt handler (registrations don't survive a reboot).
+if [ "$ARCH" = arm64 ] && [ "$(uname -m)" != aarch64 ] \
+   && [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
+  echo "Warning: no qemu-aarch64 binfmt handler is registered, so the build will"
+  echo "probably fail with 'exec format error'. Register it with:"
+  echo "  docker run --rm --privileged linuxserver/qemu-static --reset -p yes"
+fi
+
 DOCKER_BUILDKIT=1 docker build \
  -f Dockerfile.manylinux \
  --platform ${PLATFORM} \
