@@ -41,7 +41,7 @@ class WsgoTestCase(unittest.TestCase):
         return requests.post(self.url(path), **kwargs)
 
     def start(self, *args, env=None, drain=True, module=None, python_m=False,
-              processes=None):
+              processes=None, cwd=None):
         """Start the server. By default this runs the `wsgo` console script as
         a single server process; python_m launches it with `python -m wsgo`
         instead, and processes runs the process manager with that many
@@ -63,7 +63,7 @@ class WsgoTestCase(unittest.TestCase):
 
         self.process = subprocess.Popen(
             cmd,
-            cwd=os.path.dirname(__file__),
+            cwd=cwd or os.path.dirname(__file__),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=proc_env,

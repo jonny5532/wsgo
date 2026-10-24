@@ -22,6 +22,8 @@ var processCommandsMutex sync.Mutex
 var pythonExecutable string
 var serverArgs []string
 
+const childEntryPoint = "import sys; del sys.path[0]; from wsgo.__main__ import main; main()"
+
 func removeProcessCommand(cmd *exec.Cmd) {
 	processCommandsMutex.Lock()
 	defer processCommandsMutex.Unlock()
@@ -37,7 +39,10 @@ func RunProcess(wg *sync.WaitGroup, process int) {
 	defer wg.Done()
 
 	for {
-		args := append([]string{"-m", "wsgo"}, serverArgs...)
+		// Use `-c`` instead of `-m wsgo` since it doesn't put the working
+		// directory first on sys.path (which could override files in the user's
+		// app)
+		args := append([]string{"-c", childEntryPoint}, serverArgs...)
 		args = append(args, "--process", strconv.Itoa(process))
 		cmd := exec.Command(pythonExecutable, args...)
 		cmd.Stdout = os.Stdout

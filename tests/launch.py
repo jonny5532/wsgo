@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 
 from .utils import WsgoTestCase
 
@@ -20,6 +21,24 @@ class LaunchTests(WsgoTestCase):
         self.stop()
         self.assertTrue(self.wait_for_output('Process 1 has finished.'))
         self.assertTrue(self.wait_for_output('Process 2 has finished.'))
+
+    def test_process_manager_local_wsgo_module(self):
+        # A wsgo.py in the working directory mustn't shadow the package in the
+        # respawned server processes.
+        with tempfile.TemporaryDirectory() as appdir:
+            with open(os.path.join(appdir, 'wsgo.py'), 'w') as f:
+                f.write('raise ImportError("shadowed the wsgo package")\n')
+            with open(os.path.join(appdir, 'local_app.py'), 'w') as f:
+                f.write(
+                    'def application(environ, start_response):\n'
+                    '    start_response("200 OK", [("Content-Type", "text/plain")])\n'
+                    '    return [b"local"]\n'
+                )
+            self.start(module='local_app', processes=1, cwd=appdir)
+            self.assertTrue(self.wait_for_output('Process 1 starting'))
+            self.assertEqual(self.get('/').text, 'local')
+            self.assertNotIn('shadowed', self.server_output())
+            self.stop()
 
     def test_import_outside_server(self):
         # `import wsgo` (and registering a cron job) must be harmless when no
