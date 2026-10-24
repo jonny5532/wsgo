@@ -47,7 +47,6 @@ var requestBufferLength int = 1048576
 // response buffering involves an extra copy so often isn't a performance gain
 var responseBufferLength int = 0 //1048576
 var maxAge int = 0
-var maxAgeBeforeRefetch int = 0
 var pageCacheLimit uint64 = 67108864
 var staticMap staticMapping
 var staticMaxAge int = 86400
@@ -72,10 +71,6 @@ func ParseFlags(args []string) {
 	flag.Var(&staticMap, "static-map", "static file folder mapping")
 	flag.IntVar(&staticMaxAge, "static-max-age", staticMaxAge, "encourage clients to cache static files for this many seconds (0 to disable)")
 	flag.CommandLine.Parse(args)
-
-	// Must be calculated after parsing so that a non-default --max-age
-	// enables stale-while-revalidate in TryCache.
-	maxAgeBeforeRefetch = maxAge / 2
 
 	if totalWorkers < 1 {
 		log.Fatalln("--workers must be at least 1")

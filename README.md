@@ -138,9 +138,15 @@ Any request to `/static/styles.css` with a `Accept-Encoding:` header including `
  --max-age <maximum cache time in seconds>     (default 0, disabled)
 ```
 
-You can enable caching by passing the `--max-age <seconds>` argument with a positive number of seconds to cache responses for. Responses to `GET`, `HEAD` and `OPTIONS` requests which include a `Cache-Control: max-age=<seconds>` header will be cached, for the specified number of seconds or the command-line argument, whichever is lower. 
+You can enable caching by passing the `--max-age <seconds>` argument with a positive number of seconds to cache responses for. Responses to `GET`, `HEAD` and `OPTIONS` requests are only cached if they include a `Cache-Control: max-age=<seconds>` (or `s-maxage=<seconds>`) header, for the specified number of seconds or the command-line argument, whichever is lower. `s-maxage` takes precedence, so you can use it to cache a page in wsgo for a different length of time than browsers will.
 
-Responses that set cookies or are more than 1 megabyte in size are not cached.
+Responses that set cookies, have a `Cache-Control` of `no-cache`, `no-store` or `private`, are not a 200, 204 or 301, or are more than 1 megabyte in size are not cached. Requests with an `Authorization` header are never served from or stored in the cache.
+
+During the last quarter of a cached page's lifetime, the next request for it is served from the cache and also triggers a refresh of the page in the background, so that busy pages don't expire and leave visitors waiting. A page with `Cache-Control: stale-while-revalidate=<seconds>` can additionally be served for that many seconds after it has expired, whilst it is refreshed.
+
+If several requests for a page that isn't cached arrive at once, the first is passed to the application and the rest wait for its response, rather than all running the application. Pages that turn out not to be cacheable stop being coalesced like this for a few minutes.
+
+Cached responses include an `Age` header with their age in seconds.
 
 The cache respects the `Vary` response header, which is used to indicate that a cache entry should only be used if the supplied list of request header fields are the same on cached and future requests.
 

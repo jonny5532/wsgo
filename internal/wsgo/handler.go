@@ -48,10 +48,37 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	cacheableMethod := req.Method == "GET" || req.Method == "HEAD" || req.Method == "OPTIONS"
+	cachingEnabled := cacheableMethod && maxAge > 0 && pageCacheLimit > 0
+
 	try_cache_status := MISS
-	if req.Method == "GET" || req.Method == "HEAD" || req.Method == "OPTIONS" {
+	if cacheableMethod {
 		try_cache_status = TryCache(w, req)
 	}
+
+	var fill *CacheFill
+	if try_cache_status == MISS && cachingEnabled {
+		var wait <-chan struct{}
+		fill, wait = JoinCacheFill(req)
+		if wait != nil {
+			// Another request is already fetching this response from the
+			// application, so wait for it and then try the cache again.
+			select {
+			case <-wait:
+			case <-req.Context().Done():
+				return
+			case <-time.After(time.Duration(requestTimeout) * time.Second):
+			}
+			try_cache_status = TryCache(w, req)
+		}
+	}
+	cached := false
+	defer func() {
+		if fill != nil {
+			fill.Finish(cached)
+		}
+	}()
+
 	if try_cache_status == HIT {
 		LogRequest(
 			req,
@@ -64,7 +91,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 		)
 		return
 	}
-	alreadyResponded := try_cache_status == HIT_BUT_EXPIRING_SOON
+	alreadyResponded := try_cache_status == HIT_NEEDS_REFRESH
 
 	if AllWorkersAreStuck() {
 		// Last-resort safety valve: if no Python thread can make progress,
@@ -74,7 +101,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 
 	var cw *CacheWriter
 
-	if maxAge > 0 && pageCacheLimit > 0 && (req.Method == "GET" || req.Method == "HEAD" || req.Method == "OPTIONS") {
+	if cachingEnabled {
 		// We might be able to cache this
 		if alreadyResponded {
 			cw = NewCacheOnlyCacheWriter()
@@ -112,6 +139,13 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 
 	scheduler.HandleJob(job, time.Duration(requestTimeout)*time.Second)
 
+	if fill != nil && (job.sendFile != "" || job.parkedId != "") {
+		// Accelerated responses aren't cached, and parking can take a long
+		// time, so don't keep any waiting requests waiting.
+		fill.Finish(false)
+		fill = nil
+	}
+
 	if ResolveAccel(job) {
 		return
 	}
@@ -119,7 +153,7 @@ func Serve(w http.ResponseWriter, req *http.Request) {
 	cw.Flush()
 
 	if !cw.skipCaching {
-		CachePage(cw, req)
+		cached = CachePage(cw, req)
 	}
 }
 

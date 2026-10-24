@@ -33,5 +33,14 @@ def cache_biguid(environ, start_response):
     ])
 
 
+@router.route('/cache/slow')
+def cache_slow(environ, start_response):
+    time.sleep(0.5)
+    return toolkit.respond(start_response, ('%.6f' % time.time()).encode('utf-8'), headers=[
+        ('Content-Type', 'text/html'),
+        ('Cache-Control', 'max-age=60'),
+    ])
+
+
 def application(environ, start_response):
     return router.dispatch(environ, start_response)

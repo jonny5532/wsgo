@@ -16,3 +16,18 @@
   SIGUSR1/SIGUSR2 on to them, so `killall wsgo -s USR1` still works when wsgo
   was started with the `wsgo` command.
 - wsgo can be built from source with `pip install .`.
+- Page cache fixes and improvements:
+  - A cached page is refreshed in the background during the last quarter of
+    its own lifetime, by a single request. Previously the window was half of
+    `--max-age`, so a page with a shorter lifetime than `--max-age` ran the
+    application on every hit.
+  - Concurrent requests that miss the cache wait for one of them to fetch the
+    page, instead of all running the application.
+  - `Cache-Control`, `Vary` and `X-WSGo-Vary-Cookies` are parsed properly, so
+    eg. `public,max-age=60` (with no space) is now cached, and directives are
+    case-insensitive.
+  - `s-maxage` sets a lifetime for the page cache that differs from the one
+    given to browsers, and `stale-while-revalidate` allows an expired page to
+    be served whilst it is refreshed.
+  - Responses with `Vary: *` are no longer cached.
+  - Cached responses include an `Age` header.

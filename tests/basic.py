@@ -332,9 +332,9 @@ class BasicTests(WsgoTestCase):
 
     def test_cache_refreshes_before_expiry(self):
         """
-        Once a cached response is within half of --max-age, an incoming
-        request should still be served from cache but trigger a background
-        refresh, so the following request sees fresh content.
+        Once a cached response is in the last quarter of its lifetime, an
+        incoming request should still be served from cache but trigger a
+        background refresh, so the following request sees fresh content.
         """
 
         self.start('--workers', '1', '--max-age', '4', module='fixtures.cache')
@@ -344,13 +344,31 @@ class BasicTests(WsgoTestCase):
         # Immediately afterwards this is a plain cache hit with no refresh.
         self.assertEqual(self.get('/cache/time').text, t0)
 
-        # Past half of the max-age: still served from cache...
-        time.sleep(2.5)
+        # Still before the refresh window.
+        time.sleep(2)
         self.assertEqual(self.get('/cache/time').text, t0)
+
+        # In the refresh window: still served from cache...
+        time.sleep(1.2)
+        r = self.get('/cache/time')
+        self.assertEqual(r.text, t0)
+        self.assertEqual(r.headers['Age'], '3')
 
         # ...but a refresh has been queued, so fresh content appears shortly.
         time.sleep(0.5)
         self.assertNotEqual(self.get('/cache/time').text, t0)
+
+    def test_cache_coalesces_misses(self):
+        """
+        Concurrent requests for a cacheable page that isn't in the cache yet
+        should share a single response from the application.
+        """
+
+        self.start('--max-age', '60', module='fixtures.cache')
+
+        with ThreadPoolExecutor(8) as executor:
+            bodies = list(executor.map(lambda _: self.get('/cache/slow').text, range(8)))
+        self.assertEqual(len(set(bodies)), 1)
 
     def test_response_chunks_are_released(self):
         """
