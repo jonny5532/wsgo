@@ -99,6 +99,11 @@ class WsgoTestCase(unittest.TestCase):
             time.sleep(0.01)
         return False
 
+    def server_output(self):
+        """Return everything the server has written to stdout/stderr so far."""
+        with self._output_lock:
+            return ''.join(self._server_output)
+
     def stop(self):
         self.process.terminate()
         self.process.wait()

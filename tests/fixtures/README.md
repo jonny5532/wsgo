@@ -19,6 +19,7 @@ exists inside the server.
 | `close`     | `/close/tracked`, `/close/state`, `/close/accel-sendfile`, `/close/accel-park` | response `.close()` tests |
 | `park`      | `/park/start`, `/park/notify-*`, `/park/retry-again`, `/park/notify-retry-again` | park/notify tests |
 | `block`     | `/block/start`, `/block/ping`                                 | blocking tests |
+| `priority`  | `/prio/block`, `/prio/normal`, `/prio/crawler`                | priority scheduling tests |
 | `refcount`  | `/`                                                           | borrowed module dict reference test |
 
 Helpers shared by fixtures live in `toolkit.py` (`respond`, `read_body`,

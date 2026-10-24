@@ -30,6 +30,13 @@ type RequestJob struct {
 	worker     int
 	priority   int
 
+	// Scheduling inputs that are fixed for the lifetime of a queued job,
+	// precomputed by HandleJob so the priority scan doesn't re-parse the
+	// request for every candidate.
+	basePriority   int
+	rateLimitKey   string
+	demoteBySource bool
+
 	// X-SendFile / X-Accel-Redirect file
 	sendFile string
 
@@ -53,7 +60,8 @@ type Scheduler struct {
 	activeRequestsBySource      map[string]int
 	activeRequestsBySourceMutex sync.Mutex
 
-	requestsBySource *lru.TwoQueueCache[string, RequestCount]
+	requestsBySource      *lru.TwoQueueCache[string, RequestCount]
+	requestsBySourceMutex sync.Mutex
 
 	activeRequests atomic.Int32
 }
@@ -73,6 +81,10 @@ func Send504(job *RequestJob) {
 
 func (sched *Scheduler) HandleJob(job *RequestJob, timeout time.Duration) error {
 	requestCount.Add(1)
+
+	// Work out the parts of the priority that won't change while the job is
+	// queued, so the scheduling scan only has to look at per-source counts.
+	sched.PrecomputeJobPriority(job)
 
 	var dropJob *RequestJob
 	var dropJobIndex int
@@ -142,18 +154,36 @@ func (sched *Scheduler) HandleJob(job *RequestJob, timeout time.Duration) error 
 	return err
 }
 
-func (sched *Scheduler) GetAgedRequestCount(remoteAddr string) RequestCount {
-	r, _ := sched.requestsBySource.Get(remoteAddr)
-	now := time.Now()
+// ageRequestCount decays a request count at a rate of one request per second
+// since it was last updated.
+func ageRequestCount(r RequestCount, now time.Time) float64 {
 	if r.count > 0 {
-		// age count by time since last one? at rate of 1 rq/s
 		r.count -= now.Sub(r.since).Seconds()
 		if r.count < 0 {
 			r.count = 0
 		}
 	}
+	return r.count
+}
+
+// GetAgedRequestCount returns a source's historic request count, decayed to now.
+func (sched *Scheduler) GetAgedRequestCount(remoteAddr string, now time.Time) float64 {
+	sched.requestsBySourceMutex.Lock()
+	defer sched.requestsBySourceMutex.Unlock()
+
+	r, _ := sched.requestsBySource.Get(remoteAddr)
+	return ageRequestCount(r, now)
+}
+
+// AddAgedRequestCount atomically ages and increments a source's request count.
+func (sched *Scheduler) AddAgedRequestCount(remoteAddr string, now time.Time) {
+	sched.requestsBySourceMutex.Lock()
+	defer sched.requestsBySourceMutex.Unlock()
+
+	r, _ := sched.requestsBySource.Get(remoteAddr)
+	r.count = ageRequestCount(r, now) + 1
 	r.since = now
-	return r
+	sched.requestsBySource.Add(remoteAddr, r)
 }
 
 func GetRateLimitKey(ip net.IP) string {
@@ -166,42 +196,55 @@ func GetRateLimitKey(ip net.IP) string {
 	return ip.Mask(net.CIDRMask(64, 128)).String()
 }
 
-func (sched *Scheduler) CalculateJobPriority(job *RequestJob) int {
-	var priority int = 1000
+var crawlerUserAgents = []string{"facebook", "bot", "crawler", "spider", "index", "http:", "https:"}
 
-	remoteAddr := GetRemoteAddr(job.req)
-	remoteAddrIp := net.ParseIP(remoteAddr)
+// PrecomputeJobPriority calculates the parts of a job's priority that cannot
+// change while it is queued: the crawler and query-string demotions, and the
+// source key used for rate limiting. It must be called before the job is added
+// to the queue.
+func (sched *Scheduler) PrecomputeJobPriority(job *RequestJob) {
+	job.basePriority = 1000
 
-	// Check that request is being made from a non-local address
+	remoteAddrIp := net.ParseIP(GetRemoteAddr(job.req))
+
+	// Always cache the key, so grabbing and finishing the job don't have to
+	// re-parse the request either.
+	job.rateLimitKey = GetRateLimitKey(remoteAddrIp)
+
+	// We only demote crawlers and rate limit by source if we're sure the
+	// request is non-local (otherwise recursive requests with a crawler-like
+	// user-agent will hang).
 	if remoteAddrIp != nil && !remoteAddrIp.IsLoopback() && !remoteAddrIp.IsPrivate() {
-
-		// We only demote crawlers if we're sure they're non-local (otherwise
-		// recursive requests with a crawler-like user-agent will hang)
+		job.demoteBySource = true
 
 		ua := strings.ToLower(job.req.Header.Get("User-agent"))
-		for _, uas := range []string{"facebook", "bot", "crawler", "spider", "index", "http:", "https:"} {
-			if strings.Contains(ua, uas) {
-				priority -= 8000
+		for _, crawler := range crawlerUserAgents {
+			if strings.Contains(ua, crawler) {
+				job.basePriority -= 8000
 				break
 			}
 		}
-
-		// We also rate limit based a key derived from the remote address,
-		// considering both current and historic requests
-
-		key := GetRateLimitKey(remoteAddrIp)
-
-		sched.activeRequestsBySourceMutex.Lock()
-		priority -= 2000 * sched.activeRequestsBySource[key]
-		sched.activeRequestsBySourceMutex.Unlock()
-
-		r := sched.GetAgedRequestCount(key)
-		priority -= int(1000 * r.count)
 	}
 
 	if job.req.URL.RawQuery != "" {
 		// Demote anything with a query string
-		priority -= 500
+		job.basePriority -= 500
+	}
+}
+
+// CalculateJobPriority combines a job's precomputed base priority with the
+// current per-source request counts. now is passed in so a whole scan ages
+// every job against the same instant.
+func (sched *Scheduler) CalculateJobPriority(job *RequestJob, now time.Time) int {
+	priority := job.basePriority
+
+	if job.demoteBySource {
+		sched.activeRequestsBySourceMutex.Lock()
+		priority -= 2000 * sched.activeRequestsBySource[job.rateLimitKey]
+		sched.activeRequestsBySourceMutex.Unlock()
+
+		r := sched.GetAgedRequestCount(job.rateLimitKey, now)
+		priority -= int(1000 * r)
 	}
 
 	return priority
@@ -210,8 +253,9 @@ func (sched *Scheduler) CalculateJobPriority(job *RequestJob) int {
 func (sched *Scheduler) GetHighestPriorityJob() (*RequestJob, int) {
 	var job *RequestJob
 	jobIndex := -1
+	now := time.Now()
 	for k, j := range sched.jobQueue {
-		j.priority = sched.CalculateJobPriority(j)
+		j.priority = sched.CalculateJobPriority(j, now)
 		if job == nil || j.priority > job.priority {
 			job = j
 			jobIndex = k
@@ -223,8 +267,9 @@ func (sched *Scheduler) GetHighestPriorityJob() (*RequestJob, int) {
 func (sched *Scheduler) GetLowestPriorityJob() (*RequestJob, int) {
 	var job *RequestJob
 	jobIndex := -1
+	now := time.Now()
 	for k, j := range sched.jobQueue {
-		j.priority = sched.CalculateJobPriority(j)
+		j.priority = sched.CalculateJobPriority(j, now)
 		if job == nil || j.priority < job.priority {
 			job = j
 			jobIndex = k
@@ -278,7 +323,7 @@ func (sched *Scheduler) GrabJob() *RequestJob {
 			// Increment the global active-request-count
 			sched.activeRequests.Add(1)
 
-			key := GetRateLimitKey(net.ParseIP(GetRemoteAddr(job.req)))
+			key := job.rateLimitKey
 
 			// Increment the active request count for the source
 			sched.activeRequestsBySourceMutex.Lock()
@@ -286,9 +331,7 @@ func (sched *Scheduler) GrabJob() *RequestJob {
 			sched.activeRequestsBySourceMutex.Unlock()
 
 			// Increment the historic request count for the source
-			r := sched.GetAgedRequestCount(key)
-			r.count += 1
-			sched.requestsBySource.Add(key, r)
+			sched.AddAgedRequestCount(key, time.Now())
 
 			return job
 		}
@@ -310,7 +353,7 @@ func (sched *Scheduler) JobFinished(job *RequestJob) {
 	sched.activeRequests.Add(-1)
 
 	// Remove the request from the currently active requests
-	key := GetRateLimitKey(net.ParseIP(GetRemoteAddr(job.req)))
+	key := job.rateLimitKey
 	sched.activeRequestsBySourceMutex.Lock()
 	if sched.activeRequestsBySource[key] <= 1 {
 		delete(sched.activeRequestsBySource, key)
