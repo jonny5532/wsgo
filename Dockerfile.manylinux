@@ -1,0 +1,43 @@
+# Builds the release wheel in an official manylinux image, so it works on any
+# Linux with glibc 2.17+, using a recent Go toolchain (which is statically
+# linked, so runs fine on the old base). The repaired wheel is exported with:
+#
+#   docker build -f Dockerfile.manylinux --platform linux/amd64 \
+#     --build-arg MANYLINUX=manylinux2014_x86_64 \
+#     --target wheel --output type=local,dest=wheelhouse .
+#
+# ./build_arch.sh does this for each architecture.
+
+ARG MANYLINUX=manylinux2014_x86_64
+
+FROM quay.io/pypa/${MANYLINUX} AS build
+
+# Toolchain layers, cached until GO_VERSION changes.
+ARG GO_VERSION=1.25.3
+ARG TARGETARCH
+RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz | tar -C /usr/local -xz
+
+# The wheel is cp310-abi3, so build against the oldest supported Python.
+ENV PYTHON=/opt/python/cp310-cp310/bin/python
+ENV PATH=/usr/local/go/bin:$PATH
+ENV PKG_CONFIG_PATH=/opt/python/cp310-cp310/lib/pkgconfig
+
+RUN $PYTHON -m pip install --root-user-action=ignore -q "setuptools>=61" wheel
+
+WORKDIR /build
+
+# Go dependencies, cached until go.mod/go.sum change.
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Build and repair the wheel.
+COPY *.go setup.py pyproject.toml README.md LICENSE ./
+COPY internal/ internal/
+COPY wsgo/ wsgo/
+
+RUN $PYTHON -m pip wheel --no-deps --no-build-isolation -w /tmp/dist . \
+ && auditwheel repair -w /wheelhouse /tmp/dist/*.whl
+
+# Just the repaired wheel, for --output.
+FROM scratch AS wheel
+COPY --from=build /wheelhouse/ /

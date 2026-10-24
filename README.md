@@ -60,7 +60,7 @@ wsgo
 
 With a Go toolchain and the Python development headers installed, you can build and install wsgo from a checkout with `pip install .`.
 
-Alternatively, if you have Docker installed, you can run `./build.sh` (or `./build.sh arm64`) to produce a Python wheel in the `dist/` folder, then install it with `pip install <dist/file.whl>`.
+Alternatively, if you have Docker installed, you can run `./build.sh` (or `./build.sh arm64`) to produce a manylinux wheel in the `wheelhouse/` folder, then install it with `pip install <wheelhouse/file.whl>`.
 
 
 ## Caveats

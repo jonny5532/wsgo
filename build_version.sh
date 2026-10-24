@@ -3,8 +3,8 @@
 # usage: ./build_version.sh <python major version> <python minor version> <architecture> [command]
 # eg: ./build_version.sh 3 12 x86_64 "python -m tests"
 #
-# The default command copies the wheel to dist/. Release wheels are built with
-# ./build_arch.sh, which uses the oldest supported Python.
+# The default command copies the wheel to dist/. Release wheels are built in a
+# manylinux image by ./build_arch.sh instead.
 
 PY_MAJ=${1:-3}
 PY_MIN=${2:-10}

@@ -25,7 +25,7 @@ Run this to enable local qemu-static shimming:
 docker run --rm -it --privileged linuxserver/qemu-static --reset -p yes
 ```
 
-(note that debian bullseye segfaults randomly on aarch64, so may need to build with bookworm and suffer the higher GLIBC requirement).
+(note that debian bullseye segfaults randomly on aarch64, which affected the old Debian-based release builds).
 
 
 ## Running tests locally
@@ -62,41 +62,16 @@ version, which has the wheel installed, eg:
 ./build.sh arm64
 ```
 
+This builds the wheels with `Dockerfile.manylinux`, in the official
+`manylinux2014` images (glibc 2.17) with a recent Go toolchain, and repairs
+them with auditwheel, leaving `wheelhouse/wsgo-<ver>-cp310-abi3-manylinux2014_<arch>.manylinux_2_17_<arch>.whl`.
+To use a newer Go, change `GO_VERSION` in `Dockerfile.manylinux`.
+
 ```sh
 # Check the wheels only use the stable ABI
 
 pip install abi3audit
-abi3audit --strict dist/wsgo-0.1.0-cp310-abi3-*.whl
-```
-
-```sh
-# Fix binary platform level using local auditwheel
-
-pip install auditwheel\<6.4
-
-auditwheel show dist/wsgo-0.1.0-cp310-abi3-linux_x86_64.whl
-auditwheel repair --plat manylinux_2_17_x86_64 dist/wsgo-0.1.0-cp310-abi3-linux_x86_64.whl
-```
-
-```sh
-# Fix binary platform level using docker (x86_64 and aarch64)
-
-docker run -it --rm -v $PWD:/work -w /work --platform linux/amd64 $(docker build -q --platform linux/amd64 -f Dockerfile.auditwheel .) auditwheel repair --plat manylinux_2_17_x86_64 dist/wsgo-0.1.?-cp310-abi3-linux_x86_64.whl
-
-docker run -it --rm -v $PWD:/work -w /work --platform linux/arm64 $(docker build -q --platform linux/arm64 -f Dockerfile.auditwheel .) auditwheel repair --plat manylinux_2_17_aarch64 dist/wsgo-0.1.?-cp310-abi3-linux_aarch64.whl
-```
-
-Use `auditwheel show` to find the lowest platform tag a wheel supports. The
-0.1.0 x86_64 wheel built on bullseye is `manylinux_2_17` (the c-shared Go
-runtime doesn't raise the floor); a wheel built on bookworm (eg. for aarch64)
-needs `manylinux_2_34`. To check the floor of a bullseye build:
-
-```sh
-git archive HEAD | docker build --platform linux/amd64 \
-  --build-arg PY_MIN=10 --build-arg DEBIAN_RELEASE=bullseye \
-  -t wsgo-glibc-floor - \
-&& docker run --rm --platform linux/amd64 wsgo-glibc-floor \
-  bash -c "pip install -q 'auditwheel<6.4' && auditwheel show dist/*.whl"
+abi3audit --strict wheelhouse/wsgo-0.1.0-cp310-abi3-*.whl
 ```
 
 ```sh

@@ -1,3 +1,9 @@
 dist
 tests
 __pycache__
+wheelhouse
+build
+*.egg-info
+wsgo/_wsgo*.so
+wsgo/_wsgo*.h
+.git

@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builds the wheel for an architecture, runs the Go unit tests, then installs
-# the wheel into each supported CPython (and uv-managed CPythons) and runs the
-# Python tests against it.
+# Builds the release wheel for an architecture, runs the Go unit tests, then
+# installs the wheel into each supported CPython (and uv-managed CPythons) and
+# runs the Python tests against it.
 # usage: ./run_tests.sh [x86_64|arm64]
 
 set -e
@@ -24,10 +24,14 @@ case $ARCH in
 esac
 
 VERSION=$(sed -n 's/^wsgo_version = "\(.*\)"/\1/p' setup.py)
-WHEEL=wsgo-${VERSION}-cp310-abi3-linux_${WHEEL_ARCH}.whl
+# Expanded inside the test containers.
+WHEEL="wsgo-${VERSION}-cp310-abi3-manylinux*_${WHEEL_ARCH}.whl"
 
-# Build the wheel into dist/, and run the Go tests in the same build image.
-./build_arch.sh $ARCH "cp dist/*.whl /output && GOCACHE=/tmp/gocache go test -tags wsgo_embed -race ./..."
+# Build the release wheel into wheelhouse/.
+./build_arch.sh $ARCH
+
+# The Go tests need libpython to link, which the Debian image provides.
+./build_version.sh 3 10 $ARCH "GOCACHE=/tmp/gocache go test -tags wsgo_embed -race ./..."
 
 # Runs the Python tests in a container, with the wheel and tests mounted.
 run_python_tests() {
@@ -36,7 +40,7 @@ run_python_tests() {
   docker run --rm \
    --platform ${PLATFORM} \
    -e PYTHONDONTWRITEBYTECODE=1 \
-   -v $PWD/dist:/dist:ro \
+   -v $PWD/wheelhouse:/wheelhouse:ro \
    -v $PWD/tests:/code/tests:ro \
    -w /code \
    ${IMAGE} bash -c "set -e; ${SETUP}; python -m tests"
@@ -44,13 +48,13 @@ run_python_tests() {
 
 for PY_MIN in 10 11 12 13 14; do
   run_python_tests python:3.${PY_MIN}-slim \
-   "pip install -q --root-user-action=ignore /dist/${WHEEL} requests"
+   "pip install -q --root-user-action=ignore /wheelhouse/${WHEEL} requests"
 done
 
 # uv-managed interpreters, which embedding builds couldn't support.
 for PY_VER in 3.12 3.14; do
   run_python_tests ghcr.io/astral-sh/uv:debian-slim \
-   "uv venv -q --python ${PY_VER} /venv && uv pip install -q --python /venv /dist/${WHEEL} requests && export VIRTUAL_ENV=/venv PATH=/venv/bin:\$PATH"
+   "uv venv -q --python ${PY_VER} /venv && uv pip install -q --python /venv /wheelhouse/${WHEEL} requests && export VIRTUAL_ENV=/venv PATH=/venv/bin:\$PATH"
 done
 
 echo "All tests passed!"
