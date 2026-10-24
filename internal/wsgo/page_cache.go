@@ -3,6 +3,7 @@ package wsgo
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"sort"
 	"strconv"
@@ -53,7 +54,22 @@ type PageCacheEntry struct {
 	hits           uint64
 }
 
-var pageCache map[string][]*PageCacheEntry
+// The cached responses for a path, by query string.
+type pathCache struct {
+	// The query parameters to ignore for this path, from the application's
+	// X-WSGo-Ignore-Params header.
+	ignoreParams string
+	filter       *paramFilter
+	queries      map[string][]*PageCacheEntry
+}
+
+// Identifies where a request's responses are cached.
+type cacheKey struct {
+	path  string
+	query string
+}
+
+var pageCache map[string]*pathCache
 var pageCacheMutex sync.Mutex
 var pageCacheSize uint64
 
@@ -61,7 +77,7 @@ var pageCacheSize uint64
 var cacheFills map[string]*CacheFill
 
 func init() {
-	pageCache = make(map[string][]*PageCacheEntry)
+	pageCache = make(map[string]*pathCache)
 	cacheFills = make(map[string]*CacheFill)
 }
 
@@ -79,10 +95,110 @@ const (
 // miss coalescing, so that requests for it don't queue up behind each other.
 const uncacheableMarkerLifetime = 5 * time.Minute
 
-func DeriveCacheKey(req *http.Request) string {
+func derivePathKey(req *http.Request) string {
 	// The request method is part of the key so that a cached response can
 	// never be served in response to a different method.
-	return req.Method + " " + req.Host + req.URL.Path + "?" + req.URL.RawQuery
+	return req.Method + " " + req.Host + req.URL.Path
+}
+
+// cacheKeyLocked returns the key a request's responses are cached under,
+// leaving out any query parameters that the application has said to ignore
+// for its path. pageCacheMutex must be held.
+func cacheKeyLocked(req *http.Request) cacheKey {
+	key := cacheKey{path: derivePathKey(req), query: req.URL.RawQuery}
+	if pc := pageCache[key.path]; pc != nil {
+		key.query = pc.filter.strip(key.query)
+	}
+	return key
+}
+
+// pageCacheMutex must be held.
+func entriesLocked(key cacheKey) []*PageCacheEntry {
+	if pc := pageCache[key.path]; pc != nil {
+		return pc.queries[key.query]
+	}
+	return nil
+}
+
+// setEntriesLocked replaces the entries cached under a key, removing the key
+// (and its path, once it has none left) if there are none.
+// pageCacheMutex must be held.
+func setEntriesLocked(key cacheKey, entries []*PageCacheEntry) {
+	pc := pageCache[key.path]
+	if pc == nil {
+		if len(entries) == 0 {
+			return
+		}
+		pc = &pathCache{queries: make(map[string][]*PageCacheEntry)}
+		pageCache[key.path] = pc
+	}
+	if len(entries) > 0 {
+		pc.queries[key.query] = entries
+	} else {
+		delete(pc.queries, key.query)
+		if len(pc.queries) == 0 {
+			delete(pageCache, key.path)
+		}
+	}
+}
+
+// A paramFilter matches query parameter names, either exactly or by a prefix
+// (from a name ending in "*"), ignoring case.
+type paramFilter struct {
+	names    map[string]bool
+	prefixes []string
+}
+
+// parseParamFilter parses a comma separated list of parameter names, returning
+// nil if it is empty.
+func parseParamFilter(list string) *paramFilter {
+	var f *paramFilter
+	for _, name := range splitHeaderList([]string{list}) {
+		if f == nil {
+			f = &paramFilter{names: make(map[string]bool)}
+		}
+		name = strings.ToLower(name)
+		if prefix, ok := strings.CutSuffix(name, "*"); ok {
+			f.prefixes = append(f.prefixes, prefix)
+		} else {
+			f.names[name] = true
+		}
+	}
+	return f
+}
+
+func (f *paramFilter) matches(name string) bool {
+	name = strings.ToLower(name)
+	if f.names[name] {
+		return true
+	}
+	for _, prefix := range f.prefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// strip removes the matching parameters from a raw query string, leaving the
+// others as they were. A nil filter strips nothing.
+func (f *paramFilter) strip(rawQuery string) string {
+	if f == nil || rawQuery == "" {
+		return rawQuery
+	}
+
+	params := strings.Split(rawQuery, "&")
+	kept := params[:0]
+	for _, param := range params {
+		name, _, _ := strings.Cut(param, "=")
+		if unescaped, err := url.QueryUnescape(name); err == nil {
+			name = unescaped
+		}
+		if !f.matches(name) {
+			kept = append(kept, param)
+		}
+	}
+	return strings.Join(kept, "&")
 }
 
 func (entry *PageCacheEntry) variesFrom(req *http.Request) bool {
@@ -101,7 +217,6 @@ func (entry *PageCacheEntry) variesFrom(req *http.Request) bool {
 }
 
 func TryCache(w http.ResponseWriter, req *http.Request) TryCacheResponse {
-	cacheKey := DeriveCacheKey(req)
 	now := time.Now()
 
 	// The entry must be selected (and lastUsed/hits updated) whilst the lock
@@ -110,7 +225,7 @@ func TryCache(w http.ResponseWriter, req *http.Request) TryCacheResponse {
 	// so the lock can be released before writing to the client.
 	pageCacheMutex.Lock()
 	var found *PageCacheEntry
-	for _, cached := range pageCache[cacheKey] {
+	for _, cached := range entriesLocked(cacheKeyLocked(req)) {
 		if cached.statusCode <= 0 || !now.Before(cached.staleUntil) {
 			continue
 		}
@@ -301,23 +416,19 @@ func CachePage(cw *CacheWriter, req *http.Request) bool {
 
 	// If the server sent the X-WSGo-Vary-Cookies header, then filter the
 	// cookie key to just the request cookies identified in that.
-	varyCookies := strings.Join(splitHeaderList(responseHeaders.Values("X-WSGo-Vary-Cookies")), ", ")
-	if varies["Cookie"] != nil && varyCookies != "" {
-		v := ExtractCookies(*varies["Cookie"], varyCookies)
+	if varies["Cookie"] != nil && cw.varyCookies != "" {
+		v := ExtractCookies(*varies["Cookie"], cw.varyCookies)
 		varies["Cookie"] = &v
 	}
 
-	// TODO: facility for stripping uninteresting params from query (eg utm_ trackers and stuff)
-
 	now := time.Now()
 	lifetime := time.Second * time.Duration(lifetimeSeconds)
-	cacheKey := DeriveCacheKey(req)
 	entry := &PageCacheEntry{
 		buf:         cw.buf,
 		statusCode:  cw.statusCode,
 		header:      responseHeaders.Clone(),
 		vary:        varies,
-		varyCookies: varyCookies,
+		varyCookies: cw.varyCookies,
 		created:     now,
 		// Refreshing during the last quarter of the lifetime gives a busy
 		// page plenty of chances to be refreshed before it expires, whilst
@@ -334,8 +445,28 @@ func CachePage(cw *CacheWriter, req *http.Request) bool {
 
 	pageCacheMutex.Lock()
 
+	pathKey := derivePathKey(req)
+	pc := pageCache[pathKey]
+	if pc == nil {
+		pc = &pathCache{queries: make(map[string][]*PageCacheEntry)}
+		pageCache[pathKey] = pc
+	}
+	if pc.ignoreParams != cw.ignoreParams {
+		// The path's existing entries were stored under keys made with the
+		// old parameter list, so they can't be looked up reliably any more.
+		for _, entries := range pc.queries {
+			for _, existing := range entries {
+				pageCacheSize -= existing.Size()
+			}
+		}
+		pc.queries = make(map[string][]*PageCacheEntry)
+		pc.ignoreParams = cw.ignoreParams
+		pc.filter = parseParamFilter(cw.ignoreParams)
+	}
+	key := cacheKey{path: pathKey, query: pc.filter.strip(req.URL.RawQuery)}
+
 	// Build a new slice rather than modifying the existing one in place.
-	entries := pageCache[cacheKey]
+	entries := pc.queries[key.query]
 	updated := make([]*PageCacheEntry, 0, len(entries)+1)
 	replaced := false
 	for _, existing := range entries {
@@ -356,7 +487,7 @@ func CachePage(cw *CacheWriter, req *http.Request) bool {
 	if !replaced {
 		updated = append(updated, entry)
 	}
-	pageCache[cacheKey] = updated
+	setEntriesLocked(key, updated)
 	pageCacheSize += entry.Size()
 
 	if pageCacheSize > pageCacheLimit {
@@ -372,7 +503,7 @@ func CachePage(cw *CacheWriter, req *http.Request) bool {
 // the application at once.
 type CacheFill struct {
 	key       string
-	cacheKey  string
+	cacheKey  cacheKey
 	done      chan struct{}
 	followers int
 }
@@ -380,9 +511,9 @@ type CacheFill struct {
 // coalesceKeyLocked returns the key identifying requests that can share a
 // response, or "" if the request shouldn't wait for another.
 // pageCacheMutex must be held.
-func coalesceKeyLocked(req *http.Request, cacheKey string, now time.Time) string {
-	key := cacheKey
-	for _, entry := range pageCache[cacheKey] {
+func coalesceKeyLocked(req *http.Request, ck cacheKey, now time.Time) string {
+	key := ck.path + "?" + ck.query
+	for _, entry := range entriesLocked(ck) {
 		if entry.statusCode <= 0 {
 			if now.Before(entry.staleUntil) {
 				// Recently found to be uncacheable, so waiting would be
@@ -424,12 +555,11 @@ func JoinCacheFill(req *http.Request) (*CacheFill, <-chan struct{}) {
 		return nil, nil
 	}
 
-	cacheKey := DeriveCacheKey(req)
-
 	pageCacheMutex.Lock()
 	defer pageCacheMutex.Unlock()
 
-	key := coalesceKeyLocked(req, cacheKey, time.Now())
+	ck := cacheKeyLocked(req)
+	key := coalesceKeyLocked(req, ck, time.Now())
 	if key == "" {
 		return nil, nil
 	}
@@ -440,7 +570,7 @@ func JoinCacheFill(req *http.Request) (*CacheFill, <-chan struct{}) {
 
 	fill := &CacheFill{
 		key:      key,
-		cacheKey: cacheKey,
+		cacheKey: ck,
 		done:     make(chan struct{}),
 	}
 	cacheFills[key] = fill
@@ -462,9 +592,10 @@ func (fill *CacheFill) Finish(cached bool) {
 }
 
 // pageCacheMutex must be held.
-func markUncacheableLocked(cacheKey string, now time.Time) {
+func markUncacheableLocked(key cacheKey, now time.Time) {
 	until := now.Add(uncacheableMarkerLifetime)
-	for _, entry := range pageCache[cacheKey] {
+	entries := entriesLocked(key)
+	for _, entry := range entries {
 		if entry.statusCode <= 0 {
 			entry.expiry = until
 			entry.staleUntil = until
@@ -479,9 +610,8 @@ func markUncacheableLocked(cacheKey string, now time.Time) {
 		staleUntil: until,
 		lastUsed:   now,
 	}
-	entries := pageCache[cacheKey]
 	updated := make([]*PageCacheEntry, 0, len(entries)+1)
-	pageCache[cacheKey] = append(append(updated, entries...), marker)
+	setEntriesLocked(key, append(append(updated, entries...), marker))
 	pageCacheSize += marker.Size()
 
 	if pageCacheSize > pageCacheLimit {
@@ -494,6 +624,25 @@ func (entry *PageCacheEntry) Size() uint64 {
 	return 1000 + uint64(len(entry.buf))
 }
 
+// filterEntriesLocked keeps only the entries for which keep returns true,
+// subtracting the size of the others from the cache size.
+// pageCacheMutex must be held.
+func filterEntriesLocked(keep func(*PageCacheEntry) bool) {
+	for pathKey, pc := range pageCache {
+		for query, entries := range pc.queries {
+			kept := entries[:0]
+			for _, entry := range entries {
+				if keep(entry) {
+					kept = append(kept, entry)
+				} else {
+					pageCacheSize -= entry.Size()
+				}
+			}
+			setEntriesLocked(cacheKey{pathKey, query}, kept)
+		}
+	}
+}
+
 // pruneCacheLocked drops expired and never-served entries, and then evicts the
 // least recently used entries until the cache is back under its limit.
 // pageCacheMutex must be held.
@@ -502,49 +651,37 @@ func pruneCacheLocked() {
 	fmt.Println("Pruning page cache, current size", pageCacheSize)
 
 	now := time.Now()
-
-	type cacheEntry struct {
-		key   string
-		entry *PageCacheEntry
-	}
-	var all []cacheEntry
-
-	for k, entries := range pageCache {
-		kept := entries[:0]
-		for _, entry := range entries {
-			if entry.staleUntil.After(now) {
-				kept = append(kept, entry)
-				all = append(all, cacheEntry{k, entry})
-			} else {
-				pageCacheSize -= entry.Size()
-			}
-		}
-		if len(kept) == 0 {
-			delete(pageCache, k)
-		} else {
-			pageCache[k] = kept
-		}
-	}
+	filterEntriesLocked(func(entry *PageCacheEntry) bool {
+		return entry.staleUntil.After(now)
+	})
 
 	if pageCacheSize > pageCacheLimit {
 		// Evict least recently used entries, leaving some headroom so that
 		// pruning doesn't have to run on every subsequent insertion.
 		target := pageCacheLimit - pageCacheLimit/10
 
+		var all []*PageCacheEntry
+		for _, pc := range pageCache {
+			for _, entries := range pc.queries {
+				all = append(all, entries...)
+			}
+		}
 		sort.Slice(all, func(i, j int) bool {
-			return all[i].entry.lastUsed.After(all[j].entry.lastUsed)
+			return all[i].lastUsed.After(all[j].lastUsed)
 		})
 
-		for pageCacheSize > target && len(all) > 0 {
+		evicted := make(map[*PageCacheEntry]bool)
+		size := pageCacheSize
+		for size > target && len(all) > 0 {
 			oldest := all[len(all)-1]
-			pageCacheSize -= oldest.entry.Size()
+			size -= oldest.Size()
+			evicted[oldest] = true
 			all = all[:len(all)-1]
 		}
 
-		pageCache = make(map[string][]*PageCacheEntry)
-		for _, item := range all {
-			pageCache[item.key] = append(pageCache[item.key], item.entry)
-		}
+		filterEntriesLocked(func(entry *PageCacheEntry) bool {
+			return !evicted[entry]
+		})
 	}
 
 	fmt.Println("Page cache size now", pageCacheSize)

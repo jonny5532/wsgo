@@ -148,6 +148,12 @@ If several requests for a page that isn't cached arrive at once, the first is pa
 
 Cached responses include an `Age` header with their age in seconds.
 
+Query parameters that don't affect a page, such as the `utm_*`, `gclid` and `fbclid` tracking parameters added to links by analytics and advertising platforms, can be ignored when looking up the cache with the non-standard `X-WSGo-Ignore-Params` response header. It takes a list of parameter names, matched ignoring case, where a trailing `*` matches any name with that prefix. For example:
+
+`X-WSGo-Ignore-Params: utm_*, gclid, fbclid, msclkid`
+
+The list applies to every page on the same path, and is learned from the cached responses for that path, so the first request with a new parameter may still miss the cache. The application still receives the parameters, so a page that ignores them must not include them in its content (eg. in links that copy the query string), or one visitor's values will be shown to others.
+
 The cache respects the `Vary` response header, which is used to indicate that a cache entry should only be used if the supplied list of request header fields are the same on cached and future requests.
 
 For example, setting `Vary: Cookie` on a response header for a page in a customer account area will ensure that another customer, with a different session cookie, will not see a cached response belonging to the first customer.
@@ -156,10 +162,13 @@ The `Vary: Cookie` check will match the the entire `Cookie` request header, whic
 
 `X-WSGo-Vary-Cookies: sessionid, remember_me`
 
+The `X-WSGo-Vary-Cookies` and `X-WSGo-Ignore-Params` headers are removed from responses before they are sent to the client.
+
 A useful strategy is to add middleware to your application to add appropriate cache headers to every response if they are not already set. This might include:
 
 - setting `Cache-control: max-age=60` on content that rarely changes.
 - setting `Cache-control: no-cache` on any request by a logged-in user.
+- setting `X-WSGo-Ignore-Params` to the tracking parameters your site receives.
 
 
 ## Request prioritisation

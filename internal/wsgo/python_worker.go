@@ -340,6 +340,7 @@ func (worker *PythonWorker) HandleJob(job *RequestJob) {
 	}
 
 	UpdateBlocking(job)
+	job.w.takeCacheDirectives()
 
 	if CanAccelResponse(job) {
 		// Is X-Sendfile or similar - the response will be done later, based

@@ -12,7 +12,7 @@ import (
 
 func resetPageCacheForTest() {
 	pageCacheMutex.Lock()
-	pageCache = make(map[string][]*PageCacheEntry)
+	pageCache = make(map[string]*pathCache)
 	pageCacheSize = 0
 	pageCacheMutex.Unlock()
 }
@@ -27,6 +27,7 @@ func cacheTestPageWithHeaders(req *http.Request, body string, header http.Header
 	for k, vv := range header {
 		cw.Header()[k] = vv
 	}
+	cw.takeCacheDirectives()
 	cw.WriteHeader(200)
 	cw.Write([]byte(body))
 	return CachePage(cw, req)
@@ -63,7 +64,7 @@ func newTestRequest(t *testing.T, url string, header http.Header) *http.Request 
 func onlyCacheEntry(t *testing.T, req *http.Request) *PageCacheEntry {
 	pageCacheMutex.Lock()
 	defer pageCacheMutex.Unlock()
-	entries := pageCache[DeriveCacheKey(req)]
+	entries := entriesLocked(cacheKeyLocked(req))
 	if len(entries) != 1 {
 		t.Fatalf("expected one cache entry, got %d", len(entries))
 	}
@@ -408,5 +409,120 @@ func TestCacheFillSkipsUncacheableURLs(t *testing.T) {
 		t.Fatal("expected coalescing to resume")
 	} else {
 		fill.Finish(true)
+	}
+}
+
+func TestParamFilterStrip(t *testing.T) {
+	f := parseParamFilter("utm_*, gclid,FBCLID")
+	cases := map[string]string{
+		"":                                  "",
+		"page=2":                            "page=2",
+		"utm_source=news":                   "",
+		"page=2&utm_source=news&sort=price": "page=2&sort=price",
+		"UTM_Medium=email&gclid=abc&q=x":    "q=x",
+		"utm%5Fcampaign=x&q=y":              "q=y",
+		"fbclid&q=y":                        "q=y",
+		"q=utm_source&utm=1&gclid2=x":       "q=utm_source&utm=1&gclid2=x",
+		"q=a&&b=c":                          "q=a&&b=c",
+		"%zz=1&gclid=2":                     "%zz=1",
+	}
+	for in, want := range cases {
+		if got := f.strip(in); got != want {
+			t.Errorf("strip(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	if parseParamFilter(" , ") != nil {
+		t.Error("expected an empty list to give a nil filter")
+	}
+	var none *paramFilter
+	if got := none.strip("utm_source=x"); got != "utm_source=x" {
+		t.Errorf("expected a nil filter to strip nothing, got %q", got)
+	}
+}
+
+func cacheIgnoringParams(t *testing.T, url, body, ignoreParams string) {
+	header := http.Header{"Cache-Control": {"max-age=60"}}
+	if ignoreParams != "" {
+		header.Set("X-WSGo-Ignore-Params", ignoreParams)
+	}
+	if !cacheTestPageWithHeaders(newTestRequest(t, url, nil), body, header) {
+		t.Fatalf("expected %s to be cached", url)
+	}
+}
+
+func cachedBody(t *testing.T, url string) string {
+	rec := httptest.NewRecorder()
+	if TryCache(rec, newTestRequest(t, url, nil)) == MISS {
+		return ""
+	}
+	return rec.Body.String()
+}
+
+func TestCacheIgnoresParamsGivenByApplication(t *testing.T) {
+	setUpPageCacheTest(t, 3600)
+
+	cacheIgnoringParams(t, "http://example.com/landing?id=1&utm_source=news", "one", "utm_*, fbclid")
+
+	for _, url := range []string{
+		"http://example.com/landing?id=1",
+		"http://example.com/landing?utm_campaign=x&id=1&fbclid=y",
+	} {
+		if cachedBody(t, url) != "one" {
+			t.Errorf("expected %s to hit the cache", url)
+		}
+	}
+	if cachedBody(t, "http://example.com/landing?id=2&utm_source=news") != "" {
+		t.Error("expected other parameters to still be part of the cache key")
+	}
+
+	// Other paths aren't affected.
+	cacheIgnoringParams(t, "http://example.com/other?utm_source=a", "other", "")
+	if cachedBody(t, "http://example.com/other") != "" {
+		t.Error("expected a path without X-WSGo-Ignore-Params to keep all parameters")
+	}
+	if cachedBody(t, "http://example.com/other?utm_source=a") != "other" {
+		t.Error("expected the exact URL to hit the cache")
+	}
+}
+
+func TestCacheIgnoredParamsChange(t *testing.T) {
+	setUpPageCacheTest(t, 3600)
+
+	cacheIgnoringParams(t, "http://example.com/page?a=1", "a", "utm_*")
+	cacheIgnoringParams(t, "http://example.com/page?a=2", "b", "utm_*")
+	cacheIgnoringParams(t, "http://example.com/page?a=3", "c", "utm_*, ref")
+
+	// The entries stored under the old list are dropped.
+	if cachedBody(t, "http://example.com/page?a=1") != "" {
+		t.Error("expected entries from the old parameter list to be dropped")
+	}
+	if cachedBody(t, "http://example.com/page?a=3&ref=x") != "c" {
+		t.Error("expected the new parameter list to apply")
+	}
+
+	pageCacheMutex.Lock()
+	size := pageCacheSize
+	pageCacheMutex.Unlock()
+	if size != 1001 {
+		t.Errorf("expected the cache size to only count the remaining entry, got %d", size)
+	}
+}
+
+func TestCacheDirectivesAreNotSentToClient(t *testing.T) {
+	rec := httptest.NewRecorder()
+	cw := NewCacheWriter(rec)
+	cw.Header().Set("X-WSGo-Vary-Cookies", "sessionid")
+	cw.Header().Add("X-WSGo-Ignore-Params", "utm_*")
+	cw.Header().Add("X-WSGo-Ignore-Params", "gclid")
+	cw.takeCacheDirectives()
+	cw.WriteHeader(200)
+	cw.Write([]byte("body"))
+
+	if rec.Header().Get("X-WSGo-Vary-Cookies") != "" || rec.Header().Get("X-WSGo-Ignore-Params") != "" {
+		t.Error("expected the cache directive headers to be removed from the response")
+	}
+	if cw.varyCookies != "sessionid" || cw.ignoreParams != "utm_*, gclid" {
+		t.Errorf("unexpected directives %q, %q", cw.varyCookies, cw.ignoreParams)
 	}
 }

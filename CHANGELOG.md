@@ -31,3 +31,6 @@
     be served whilst it is refreshed.
   - Responses with `Vary: *` are no longer cached.
   - Cached responses include an `Age` header.
+  - The new `X-WSGo-Ignore-Params` response header lists query parameters
+    (such as `utm_*` tracking parameters) to ignore when looking up the cache.
+  - `X-WSGo-Vary-Cookies` is no longer sent to the client.

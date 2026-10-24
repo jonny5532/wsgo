@@ -33,6 +33,17 @@ def cache_biguid(environ, start_response):
     ])
 
 
+@router.route('/cache/landing')
+def cache_landing(environ, start_response):
+    return toolkit.respond(start_response, ('%.6f' % time.time()).encode('utf-8'), headers=[
+        ('Content-Type', 'text/html'),
+        ('Cache-Control', 'max-age=60'),
+        ('Vary', 'Cookie'),
+        ('X-WSGo-Vary-Cookies', 'sessionid'),
+        ('X-WSGo-Ignore-Params', 'utm_*, fbclid'),
+    ])
+
+
 @router.route('/cache/slow')
 def cache_slow(environ, start_response):
     time.sleep(0.5)

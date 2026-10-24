@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type CacheWriter struct {
@@ -14,6 +15,10 @@ type CacheWriter struct {
 	finished      bool
 	statusCode    int
 	buf           []byte
+
+	// From the X-WSGo-Vary-Cookies and X-WSGo-Ignore-Params headers.
+	varyCookies  string
+	ignoreParams string
 }
 
 var cacheWriterLimit = 1000000
@@ -53,6 +58,17 @@ func (cw *CacheWriter) Header() http.Header {
 		return cw.cacheHeader
 	}
 	return cw.writer.Header()
+}
+
+// takeCacheDirectives removes the headers that control the page cache from the
+// response, so that they aren't sent to the client, keeping their values for
+// CachePage.
+func (cw *CacheWriter) takeCacheDirectives() {
+	header := cw.Header()
+	cw.varyCookies = strings.Join(splitHeaderList(header.Values("X-WSGo-Vary-Cookies")), ", ")
+	cw.ignoreParams = strings.Join(splitHeaderList(header.Values("X-WSGo-Ignore-Params")), ", ")
+	header.Del("X-WSGo-Vary-Cookies")
+	header.Del("X-WSGo-Ignore-Params")
 }
 
 func (cw *CacheWriter) bufferedWrite(b []byte) (int, error, int) {

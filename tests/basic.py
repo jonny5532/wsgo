@@ -358,6 +358,26 @@ class BasicTests(WsgoTestCase):
         time.sleep(0.5)
         self.assertNotEqual(self.get('/cache/time').text, t0)
 
+    def test_cache_ignores_params(self):
+        self.start('--max-age', '60', module='fixtures.cache')
+
+        # Parameters are only ignored once the application has said to.
+        r = self.get('/cache/landing?utm_source=a')
+        t = r.text
+        self.assertNotIn('X-WSGo-Ignore-Params', r.headers)
+        self.assertNotIn('X-WSGo-Vary-Cookies', r.headers)
+
+        r = self.get('/cache/landing?utm_source=b&fbclid=c')
+        self.assertEqual(r.text, t)
+        self.assertNotIn('X-WSGo-Ignore-Params', r.headers)
+        self.assertNotIn('X-WSGo-Vary-Cookies', r.headers)
+        self.assertEqual(self.get('/cache/landing').text, t)
+        self.assertNotEqual(self.get('/cache/landing?id=1&utm_source=a').text, t)
+
+        # Other paths still use every parameter.
+        t2 = self.get('/cache/time?utm_source=a').text
+        self.assertNotEqual(self.get('/cache/time?utm_source=b').text, t2)
+
     def test_cache_coalesces_misses(self):
         """
         Concurrent requests for a cacheable page that isn't in the cache yet
