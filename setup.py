@@ -29,8 +29,11 @@ class GoBuildExt(build_ext):
             env.get("CGO_CFLAGS", "-O2 -g") + " -DPy_LIMITED_API=" + LIMITED_API_HEX
         )
 
+        # -buildvcs=false: the wheel doesn't need Go's VCS stamp, and stamping
+        # fails when git rejects the checkout (eg. a mount owned by another
+        # user in a build container).
         subprocess.check_call(
-            ["go", "build", "-buildmode=c-shared", "-ldflags=-s -w", "-o", output, "."],
+            ["go", "build", "-buildmode=c-shared", "-buildvcs=false", "-ldflags=-s -w", "-o", output, "."],
             cwd=this_directory,
             env=env,
         )
