@@ -53,7 +53,11 @@ type RequestCount struct {
 type Scheduler struct {
 	jobQueue      []*RequestJob
 	jobQueueMutex sync.Mutex
-	jobsWaiting   chan bool
+
+	// Idle workers waiting for a job, as a stack of their wake channels. New
+	// jobs wake the most recently idle worker.
+	idleWorkers      []chan struct{}
+	idleWorkersMutex sync.Mutex
 
 	activeRequestsBySource      map[string]int
 	activeRequestsBySourceMutex sync.Mutex
@@ -102,14 +106,8 @@ func (sched *Scheduler) HandleJob(job *RequestJob, timeout time.Duration) error 
 		droppedCount.Add(1)
 		dropJob.done <- true
 	} else {
-		// We added a job to the list, so signal that to any waiting handlers.
-		// This must be a non-blocking send: if the channel is already full then
-		// there are plenty of wakeups pending, and blocking here would stall
-		// the HTTP handler goroutine (past its request timeout) under load.
-		select {
-		case sched.jobsWaiting <- true:
-		default:
-		}
+		// We added a job to the list, so wake an idle worker to take it.
+		sched.wakeIdleWorker()
 	}
 
 	// this is ugly?
@@ -298,7 +296,86 @@ func (sched *Scheduler) grabQueuedJob() *RequestJob {
 	return nil
 }
 
+// claimJob marks a job as taken by the calling worker, returning false if
+// another worker has already claimed it.
+func (sched *Scheduler) claimJob(job *RequestJob) bool {
+	if job.grabbed.Swap(true) {
+		return false
+	}
+
+	// Increment the global active-request-count
+	sched.activeRequests.Add(1)
+
+	key := job.rateLimitKey
+
+	// Increment the active request count for the source
+	sched.activeRequestsBySourceMutex.Lock()
+	sched.activeRequestsBySource[key] += 1
+	sched.activeRequestsBySourceMutex.Unlock()
+
+	// Increment the historic request count for the source
+	sched.AddAgedRequestCount(key, time.Now())
+
+	return true
+}
+
+// tryGrabJob takes the highest priority runnable job from the queue, if any.
+func (sched *Scheduler) tryGrabJob() *RequestJob {
+	for {
+		job := sched.grabQueuedJob()
+		if job == nil {
+			return nil
+		}
+		if sched.claimJob(job) {
+			return job
+		}
+		// was already grabbed by someone else, skip
+	}
+}
+
+// pushIdleWorker records a worker as idle, on top of the stack.
+func (sched *Scheduler) pushIdleWorker(wake chan struct{}) {
+	sched.idleWorkersMutex.Lock()
+	sched.idleWorkers = append(sched.idleWorkers, wake)
+	sched.idleWorkersMutex.Unlock()
+}
+
+// Wake the most recently idle worker, if there is one, removing it from the
+// stack.
+func (sched *Scheduler) wakeIdleWorker() {
+	sched.idleWorkersMutex.Lock()
+	defer sched.idleWorkersMutex.Unlock()
+	if n := len(sched.idleWorkers); n > 0 {
+		wake := sched.idleWorkers[n-1]
+		sched.idleWorkers[n-1] = nil
+		sched.idleWorkers = sched.idleWorkers[:n-1]
+		wake <- struct{}{}
+	}
+}
+
+// Take a worker that has stopped waiting off the stack. If it was woken in the
+// meantime, the wakeup was meant for a job it may not be taking, so it's passed
+// on to the next idle worker.
+func (sched *Scheduler) removeIdleWorker(wake chan struct{}) {
+	sched.idleWorkersMutex.Lock()
+	for i, w := range sched.idleWorkers {
+		if w == wake {
+			sched.idleWorkers = append(sched.idleWorkers[:i], sched.idleWorkers[i+1:]...)
+			sched.idleWorkersMutex.Unlock()
+			return
+		}
+	}
+	sched.idleWorkersMutex.Unlock()
+
+	// Not on the stack, so it was woken (and the signal is already buffered,
+	// as wakeIdleWorker sends whilst holding the lock).
+	<-wake
+	sched.wakeIdleWorker()
+}
+
 func (sched *Scheduler) GrabJob() *RequestJob {
+	wake := make(chan struct{}, 1)
+
 	for {
 		// Exit promptly if shutdown has been requested.
 		select {
@@ -308,38 +385,37 @@ func (sched *Scheduler) GrabJob() *RequestJob {
 		}
 
 		// Try and grab a waiting job
-		job := sched.grabQueuedJob()
-		if job != nil {
-			// Try to grab exclusively
-			if job.grabbed.Swap(true) {
-				// was already grabbed by someone else, skip
-				continue
-			}
-
-			// Increment the global active-request-count
-			sched.activeRequests.Add(1)
-
-			key := job.rateLimitKey
-
-			// Increment the active request count for the source
-			sched.activeRequestsBySourceMutex.Lock()
-			sched.activeRequestsBySource[key] += 1
-			sched.activeRequestsBySourceMutex.Unlock()
-
-			// Increment the historic request count for the source
-			sched.AddAgedRequestCount(key, time.Now())
-
+		if job := sched.tryGrabJob(); job != nil {
 			return job
 		}
 
-		// Nothing to grab, so block
-		select {
-		case <-sched.jobsWaiting:
-			// woke up for a waiting job
-		case <-workerStop:
-			return nil
-		case <-time.After(time.Duration(rand.Intn(400)+800) * time.Millisecond):
-			// woke up after timeout (to avoid potential deadlocks)
+		// No job was grabbed, so wait until we're woken. We register as idle
+		// first to ensure we don't miss any jobs that arrive in the gap.
+		sched.pushIdleWorker(wake)
+		if job := sched.tryGrabJob(); job != nil {
+			sched.removeIdleWorker(wake)
+			return job
+		}
+
+	waiting:
+		for {
+			select {
+			case <-wake:
+				// Woken for a new job (and already off the stack).
+				break waiting
+			case <-workerStop:
+				sched.removeIdleWorker(wake)
+				return nil
+			case <-time.After(time.Duration(rand.Intn(400)+800) * time.Millisecond):
+				// Poll occasionally, to pick up low priority jobs that are
+				// skipped whilst busy, and to avoid potential deadlocks. We
+				// stay on the stack meanwhile, so that polling doesn't move
+				// long-idle workers back to the top.
+				if job := sched.tryGrabJob(); job != nil {
+					sched.removeIdleWorker(wake)
+					return job
+				}
+			}
 		}
 	}
 }
@@ -369,7 +445,6 @@ func NewScheduler() *Scheduler {
 	}
 
 	return &Scheduler{
-		jobsWaiting:            make(chan bool, maxQueueLength),
 		activeRequestsBySource: make(map[string]int),
 		requestsBySource:       requestsBySource,
 	}

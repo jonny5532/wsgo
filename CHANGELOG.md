@@ -43,3 +43,6 @@
   least 4KB/s (after a 30 second allowance), so that slow or stalling clients
   can't tie up workers. Time spent by the application between reads and
   writes doesn't count.
+- Requests are given to the most recently idle worker, rather than shared out
+  across every worker in turn. Under light load only a few workers are used,
+  so the rest don't each hold open a database connection.
