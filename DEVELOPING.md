@@ -40,7 +40,7 @@ source /tmp/env/bin/activate
 python3 -m tests
 ```
 
-To run everything in Docker, against CPython 3.10-3.14 and uv-managed
+To run everything in Docker, against CPython 3.10-3.15 and uv-managed
 interpreters:
 
 ```sh

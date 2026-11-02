@@ -13,7 +13,7 @@ ARG MANYLINUX=manylinux2014_x86_64
 FROM quay.io/pypa/${MANYLINUX} AS build
 
 # Toolchain layers, cached until GO_VERSION changes.
-ARG GO_VERSION=1.25.3
+ARG GO_VERSION=1.27.3
 ARG TARGETARCH
 RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz | tar -C /usr/local -xz
 

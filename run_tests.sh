@@ -31,7 +31,7 @@ WHEEL="wsgo-${VERSION}-cp310-abi3-manylinux*_${WHEEL_ARCH}.whl"
 ./build_arch.sh $ARCH
 
 # The Go tests need libpython to link, which the Debian image provides.
-./build_version.sh 3 10 $ARCH "GOCACHE=/tmp/gocache go test -tags wsgo_embed -race ./..."
+./build_version.sh 3 10 $ARCH "go test -tags wsgo_embed -race ./..."
 
 # Runs the Python tests in a container, with the wheel and tests mounted.
 run_python_tests() {
@@ -46,13 +46,13 @@ run_python_tests() {
    ${IMAGE} bash -c "set -e; ${SETUP}; python -m tests"
 }
 
-for PY_MIN in 10 11 12 13 14; do
+for PY_MIN in 10 11 12 13 14 15; do
   run_python_tests python:3.${PY_MIN}-slim \
    "pip install -q --root-user-action=ignore /wheelhouse/${WHEEL} requests"
 done
 
 # uv-managed interpreters, which embedding builds couldn't support.
-for PY_VER in 3.12 3.14; do
+for PY_VER in 3.12 3.15; do
   run_python_tests ghcr.io/astral-sh/uv:debian-slim \
    "uv venv -q --python ${PY_VER} /venv && uv pip install -q --python /venv /wheelhouse/${WHEEL} requests && export VIRTUAL_ENV=/venv PATH=/venv/bin:\$PATH"
 done
