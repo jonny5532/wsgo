@@ -192,6 +192,9 @@ func Main(args []string, executable string) int {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	// Rename the Python process for easier identification.
+	setProcessName(processName(process))
+
 	if process == 0 {
 		// The manager never imports the application.
 		threadState := C.PyEval_SaveThread()

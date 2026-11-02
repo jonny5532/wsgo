@@ -209,7 +209,7 @@ You can send signals to running wsgo processes to cause them to report status in
 
 `killall wsgo -s USR2` will print request and error count and memory statistics.
 
-The main `wsgo` process passes these signals on to each of its server processes, which show up as `python` processes. If you started wsgo with `python -m wsgo`, the main process is also named `python`, so send the signal to its process ID instead.
+The main `wsgo` process passes these signals on to each of its server processes, which are named `wsgo-1`, `wsgo-2` and so on. This works however wsgo was started, including with `python -m wsgo`.
 
 
 ## Cron-like system

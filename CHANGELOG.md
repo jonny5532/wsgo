@@ -12,9 +12,9 @@
   The command-line flags are unchanged.
 - `import wsgo` now works outside the server (eg. from a management command),
   so modules that use `@wsgo.cron`/`@wsgo.timer` can be imported anywhere.
-- Server processes now show up as `python` processes. The main process passes
-  SIGUSR1/SIGUSR2 on to them, so `killall wsgo -s USR1` still works when wsgo
-  was started with the `wsgo` command.
+- The main process is named `wsgo` and server processes `wsgo-1`, `wsgo-2`
+  and so on, as shown by `ps`, `top` and `pgrep`, rather than as the Python
+  interpreter. Their full command lines still show the interpreter.
 - wsgo can be built from source with `pip install .`.
 - Page cache fixes and improvements:
   - A cached page is refreshed in the background during the last quarter of

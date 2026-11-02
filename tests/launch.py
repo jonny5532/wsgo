@@ -22,6 +22,40 @@ class LaunchTests(WsgoTestCase):
         self.assertTrue(self.wait_for_output('Process 1 has finished.'))
         self.assertTrue(self.wait_for_output('Process 2 has finished.'))
 
+    def test_process_names(self):
+        # The manager and server processes are named for ps/pgrep, rather
+        # than showing as the Python interpreter.
+        self.start('--workers', '2', processes=2)
+        self.assertTrue(self.wait_for_output('Process 1 starting'))
+        self.assertTrue(self.wait_for_output('Process 2 starting'))
+        self.assertEqual(self.get('/ok').status_code, 200)
+
+        def comm(pid):
+            with open(f'/proc/{pid}/comm') as f:
+                return f.read().strip()
+
+        def children(pid):
+            pids = []
+            for entry in os.listdir('/proc'):
+                if not entry.isdigit():
+                    continue
+                try:
+                    with open(f'/proc/{entry}/stat') as f:
+                        # The ppid follows the parenthesised name, which may
+                        # itself contain spaces or parentheses.
+                        stat = f.read().rsplit(')', 1)[1].split()
+                except OSError:
+                    continue
+                if int(stat[1]) == pid:
+                    pids.append(int(entry))
+            return pids
+
+        self.assertEqual(comm(self.process.pid), 'wsgo')
+        self.assertEqual(
+            sorted(comm(pid) for pid in children(self.process.pid)),
+            ['wsgo-1', 'wsgo-2'],
+        )
+
     def test_process_manager_local_wsgo_module(self):
         # A wsgo.py in the working directory mustn't shadow the package in the
         # respawned server processes.
