@@ -91,6 +91,26 @@ Due to the Python Global Interpreter Lock (GIL), only one thread can run at a ti
 The most appropriate number of threads or processes will depend on your application[^1].
 
 
+## Memory usage
+
+Memory allocated by Python during request handling often won't be returned back to the system, because Python's arena allocator won't free a block until every allocation inside it is freed, and longer term values may be stored in the same block.
+
+Using an alternate allocator such as [jemalloc](https://jemalloc.net/) can solve this, greatly reducing long term memory use:
+
+```bash
+LD_PRELOAD=libjemalloc.so.2 \
+PYTHONMALLOC=malloc \
+MALLOC_CONF=background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:0,narenas:2 \
+wsgo ...
+```
+
+- `PYTHONMALLOC=malloc` is needed, otherwise Python's allocator still holds on to the memory.
+- `background_thread:true` is needed, otherwise memory is only returned whilst the process is busy allocating.
+- `narenas:2` does the same job as glibc's `arena_max=2`. The `GLIBC_TUNABLES` setting has no effect once jemalloc is in use.
+
+In testing this resulted in slightly higher CPU usage (1-2%), slightly higher peak memory usage, but almost complete recovery of temporarily allocated memory after requests.
+
+
 ## Timeouts
 
 ```
