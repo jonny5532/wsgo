@@ -46,3 +46,4 @@
 - Requests are given to the most recently idle worker, rather than shared out
   across every worker in turn. Under light load only a few workers are used,
   so the rest don't each hold open a database connection.
+- Many fixes to the page cache and static file serving.
