@@ -47,6 +47,10 @@ interpreters:
 ./run_tests.sh x86_64
 ```
 
+`./run_tests.sh arm64` builds and tests the arm64 wheel too, usually under
+qemu, so it skips the Go tests and only covers CPython 3.10 and 3.15 (plus
+uv's 3.15).
+
 You can also run a command in the build image for a particular Python
 version, which has the wheel installed, eg:
 
